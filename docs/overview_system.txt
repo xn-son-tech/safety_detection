@@ -1,0 +1,29 @@
+1. name: 
+	Kiểm tra & Giám sát bảo hộ lao động tại công trường xây dựng
+2. requirement
+	- detech người 
+	- detech PPE
+3. scope: 
+	- Detect người (person detection) bằng YOLOv8
+	- Detect PPE:
+		Helmet / No Helmet
+		Safety Vest / No Vest
+		Animal
+	- nhận diện người
+	- capture ảnh 
+4. product
+	- slide
+	- admin: rule management, image, Statistics
+	- desktop app
+5. flow
+	Camera
+	   ↓
+	AI Engine (YOLOv8)
+	   ↓
+	Rule Engine
+	   ↓
+	Backend API
+	   ↓
+	Database
+	   ↓
+	Dashboard (Admin)

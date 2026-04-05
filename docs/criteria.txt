@@ -1,0 +1,41 @@
+Bài cuối kỳ cần có:
+1. Slide báo cáo phần lý thuyết 
+2. Code demo 
+3. Quyển báo cáo
+Yêu cầu:
+1.  Chủ đề của bài tập lớn có tính thực tế, giải quyết một vấn đề trong thực tế liên quan đến hệ thống, sản phẩm phần mềm ứng dụng xử lý hình ảnh/video, có thể sử dụng các thuật toán của computer vision như nhận dạng đối tượng, ....
+2.  Chủ đề cần đảm bảo:
+a.     Có tính thực tiễn, ứng dụng rõ ràng trong thực tế (VD giám sát an ninh, y tế, giao thông, nông nghiệp, giáo dục, sản xuất, môi trường…).
+b.    Bao gồm ít nhất một phần phân tích bài toán thực tế có liên quan đến xử lý ảnh/video hoặc computer vision.
+c.     Có tiềm năng phát triển thành sản phẩm ứng dụng như website, ứng dụng di động, desktop, hệ thống nhúng hoặc API tích hợp.
+3.  Các mô tả về giải pháp đã chọn, bao gồm:
+a.     Lý do chọn chủ đề.
+b.    Mục tiêu và phạm vi thực hiện về mặt chức năng (các tác vụ CV: detection, classification, segmentation, tracking, OCR, …), phi chức năng (độ chính xác, tốc độ thời gian thực, khả năng mở rộng, deploy…).
+c.     Phân tích, thiết kế pipeline xử lý ảnh, computer vision, lựa chọn/thiết kế mô hình (OpenCV, CNN, YOLO, ViT, Segment Anything…), thu thập/huấn luyện/transfer learning dữ liệu, đánh giá mô hình; đồng thời thiết kế mô hình cơ sở dữ liệu (nếu có) và cài đặt trên một hệ quản trị CSDL cụ thể.
+d.    Xây dựng được kịch bản, giao diện mô phỏng chức năng của sản phẩm (demo web/app hoặc chương trình chạy trực tiếp).
+e.     Kết quả mong đợi sau khi hoàn thành bài tập lớn.
+NỘI DUNG BÁO CÁO
+1.     Giới thiệu chung
+-     Lý do chọn đề tài
+-     Mục tiêu và phạm vi thực hiện
+-     Ý nghĩa và ứng dụng thực tế của sản phẩm
+2.     Phân tích bài toán thực tế
+-     Phân tích nghiệp vụ, mô tả yêu cầu chức năng và phi chức năng của sản phẩm
+-     Đánh giá ưu nhược điểm của các công nghệ và mô hình xử lý ảnh, computer vision được lựa chọn cho dự án
+3.     Thiết kế hệ thống và pipeline 
+a.     Thiết kế pipeline xử lý 
+-     Phân tích yêu cầu, xác định các module xử lý hình ảnh/video (pre-processing, feature extraction, model chính, post-processing)
+-     Thiết kế kiến trúc tổng thể của hệ thống (data flow, model architecture) và vẽ
+sơ đồ khối (Block Diagram) hoặc flowchart pipeline
+-     Lựa chọn và thiết kế mô hình, chiến lược huấn luyện/transfer learning
+b.    Thiết kế cơ sở dữ liệu và cài đặt trên hệ quản trị CSDL (nếu có)
+-     Thiết kế cơ sở dữ liệu
+-     Thiết kế và triển khai các bảng lưu trữ dữ liệu hình ảnh, metadata, kết quả nhận dạng, thông tin người dùng…
+4.     Kết quả thực hiện
+a.     Trình bày sản phẩm ứng dụng: giao diện người dùng, tính năng chính, kịch bản minh họa kết quả mô phỏng 
+b.    Đánh giá kết quả đạt được
+·       Đánh giá hiệu suất mô hình (accuracy, precision, recall, mAP, FPS, …)
+·       Đánh giá ưu nhược điểm của pipeline và mô hình trong bối cảnh bài toán thực tế
+·       Đánh giá ưu nhược điểm của cơ sở dữ liệu và hệ thống lưu trữ
+c.     Những hạn chế của đề tài
+d.    Hướng phát triển trong tương lai
