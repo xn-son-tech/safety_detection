@@ -52,12 +52,74 @@ Thay vì đẩy ảnh RAW thẳng vào YOLO, nhóm thiết kế một Module dù
 ---
 
 ## 4. Kiến trúc Tổng thể (Overall System Architecture)
-Hệ thống là kiến trúc hướng sự kiện thời gian thực (Real-time Event-driven Architecture):
 
-1. **Tầng Edge (Camera & Local Server):** Nơi vận hành trực tiếp bộ OpenCV (Xử lý ảnh cổ điển) và Pytorch (YOLO) để bắt frame, mổ tả hình dáng và tracking ID công nhân.
-2. **Tầng Middleware (In-memory Buffer):** Nhận dòng chảy dữ liệu mảng, đếm cửa sổ thời gian (30 frame/giây) dựa trên Time-Sliding Voting. Lọc bỏ các tín hiệu cảnh báo nhấp nháy (Flickering).
-3. **Tầng Core Database:** Nơi ghi nhận kết quả lưu trú cho Admin (Metadata hình thái + Link ảnh chụp + Timestamp).
-4. **Tầng Application (Dashboard):** Giao diện Web/App kéo dữ liệu từ WebSockets.
+Hệ thống tuân theo thiết kế mô hình **Edge-to-Cloud (Từ Biên lên Trung tâm)**, là kiến trúc tiêu chuẩn trong các giải pháp IoT và Smart Surveillance hiện đại nhằm giải quyết bài toán thắt cổ chai bằng băng thông (Bottleneck). Kiến trúc được chia thành 4 Tầng (Zones) chuyên biệt:
+
+### 4.1 Zone 1: Khu vực Công trường (Physical Edge)
+* **Vai trò:** Khởi tạo dữ liệu. Camera (IP/CCTV) liên tục thu phát tín hiệu luồng Video theo chuẩn **RTSP (Real Time Streaming Protocol)**.
+* **Technical Rationale:** Tầng này được thiết kế thuần tủy làm "Dummy Node" (Thu hình thuần), không tích hợp bộ xử lý AI nội bộ nhằm tối ưu chi phí đầu tư thiết bị.
+
+### 4.2 Zone 2: Máy chủ Xử lý Biên (Edge Processing)
+* **Vai trò:** Trung tâm chẩn đoán đồ họa. Local Server đặt ngay tại công trường chịu trách nhiệm nhồi toàn bộ công suất tính toán toán học (IVP) và học sâu (YOLOv8) để phân tích hình ảnh. 
+* **Technical Rationale (Đột phá hệ thống):** Việc không gửi trực tiếp Video từ Zone 1 lên Cloud cứu hệ thống khỏi cái chết lâm sàng do sập băng thông. Edge Server sau khi xử lý xong chỉ tổng hợp ra một lệnh JSON vài Kilobytes (chứa ID, tọa độ vi phạm) và một tầm ảnh bằng chứng nhỏ gọn để đẩy lên mạng, giảm trên 99% áp lực đường truyền.
+
+### 4.3 Zone 3: Hệ thống Trung tâm (Central Backend Data)
+* **Vai trò:** Hệ thống não bộ lưu trữ chạy trên Cloud (AWS/VPS), quản lý API (NodeJS/FastAPI), Database (Ghi nhận lịch sử vi phạm) và Storage.
+* **Technical Rationale (Cơ chế Chống Spam):** Chìa khóa hệ thống nằm ở cụm **RAM/Redis Cache**. Nếu một công nhân đứng nói chuyện liên tục 15 phút, Local Edge sẽ dội hàng ngàn lệnh vi phạm về máy chủ. Lớp in-memory Cache đóng vai trò khóa (Cooldown). Nếu ID#10 đã ghi nhận vi phạm, cache sẽ chặn mọi lệnh ghi vòng lặp tương tự trong 5 phút tiếp theo. Điều này bảo vệ Data SQL khỏi bị "banh chành" ổ lưu trữ.
+
+### 4.4 Zone 4: Tầng Ứng dụng Quản trị (Dashboard)
+* **Vai trò:** Tiếp nhận và báo động theo thời gian thực (Real-time).
+* **Technical Rationale:** Sử dụng biểu thức giao tiếp **WebSockets** cấu trúc đa chiều thay vì HTTP truyền thống. Khi Zone 3 có cảnh báo, WebSocket Push Alert trực tiếp về màn hình trong vòng chưa tới 0.1 giây mà không cần bảo vệ phải tải lại trang (F5).
+
+---
+
+**Sơ đồ System Overview Tổng thể (Global Topology):**
+
+```mermaid
+flowchart LR
+    %% Định nghĩa các lớp phân tầng
+    subgraph Zone_Construction [1. Khu vực Công trường - Physical Edge]
+        C1(Camera Giám sát Khu A)
+        C2(Camera Giám sát Khu B)
+    end
+
+    subgraph Zone_Edge_Server [2. Máy chủ Local - Edge Processing]
+        direction TB
+        V[Nhận diện luồng Video & Decode]
+        IVP[IVP Module: Không gian màu & Lọc rác]
+        AI[AI Engine: YOLO + BoT-SORT]
+        RULE[Logic Rule: Xếp hạng hành vi]
+        
+        V ==> IVP ==> AI ==> RULE
+    end
+
+    subgraph Zone_Central [3. Hệ thống Trung tâm - Central Data]
+        direction TB
+        API[Backend API]
+        CACHE[(RAM/Redis Cache\n- Chống Spam)]
+        DB[(Database SQL\n- Lưu Lịch sử)]
+        FILE[(Storage\n- Lưu ảnh Crop vi phạm)]
+        
+        API <-.-> CACHE
+        API ==> DB
+        API ==> FILE
+    end
+
+    subgraph Zone_Apps [4. Ứng dụng & Quản trị]
+        WEB(Dashboard Web\n- Review & Thống kê)
+        APP(Cảnh báo Tức thời\n- Desktop/Mobile)
+    end
+
+    %% Các luồng liên kết hệ thống
+    C1 -- Luồng RTSP --> V
+    C2 -- Luồng RTSP --> V
+
+    RULE == Gói JSON Bằng chứng (Metadata + Khung ảnh) ==> API
+    
+    DB -. Đồng bộ Dữ liệu .-> WEB
+    API == WebSockets Push Alert ==> WEB
+    API == Phân phối Notification ==> APP
+```
 
 ---
 
