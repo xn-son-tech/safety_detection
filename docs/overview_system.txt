@@ -4,13 +4,14 @@
 	- detech người 
 	- detech PPE
 3. scope: 
-	- Detect người (person detection) bằng YOLOv8
-	- Detect PPE:
-		Helmet / No Helmet
-		Safety Vest / No Vest
-		Animal
-	- nhận diện người
-	- capture ảnh 
+	- Detect người (Person Detection & Tracking ID) bằng YOLOv8 + BoT-SORT.
+	  (Lưu ý: Chỉ gán nhãn và tracking ID để lưu bằng chứng, không thực hiện nhận diện danh tính FaceID).
+	- Định hướng Deep-dive MVP: Focus xử lý cực sâu mọi ngoại lệ (Edge cases) cho object Helmet trước.
+	- Dynamic Rule Engine: Xây dựng cơ chế cấu hình động để dễ dàng scale sang các PPE khác:
+		Helmet / No Helmet (MVP)
+		Safety Vest / No Vest (Scale sau)
+		Animal (Scale sau)
+	- Capture ảnh vi phạm và push metadata về Central Database cho bảo vệ review.
 4. product
 	- slide
 	- admin: rule management, image, Statistics

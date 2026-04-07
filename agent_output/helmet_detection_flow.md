@@ -17,8 +17,8 @@ Tài liệu này cung cấp thiết kế toàn diện cho phân hệ **Nhận di
 ### 💡 Hướng giải quyết & Dẫn chứng kỹ thuật (Rationale):
 * **Giải pháp 1: Áp dụng Structural Similarity Index (SSIM) hoặc kiểm tra File Header thay vì Mean Squared Error (MSE) cho lỗi RTSP.**
   * *Tại sao:* MSE chỉ đo trung bình điểm ảnh, không hiểu được cấu trúc. Khung hình xám một nửa vẫn có thể qua mặt. SSIM đo lường mức độ phá hủy cấu trúc hình ảnh, loại bỏ dứt điểm các frame bị rách do packet loss. Bỏ qua frame lỗi giúp AI không suy luận kết quả rác.
-* **Giải pháp 2: Bộ lọc Variance of Laplacian để phát hiện mờ (Blurry Detection).**
-  * *Tại sao dùng Laplacian thay vì Fast Fourier Transform (FFT):* Tính toán biến thiên của thuật toán Laplacian cực kỳ nhẹ và nhanh (Real-time). FFT cũng phân tích tầng số không gian nhưng chi phí toán học quá tốn kém để chạy trên từng frame camera. Threshold của Laplacian nhỏ hơn mức quy định -> drop frame.
+* **Giải pháp 2: Thuật toán đo lường mức độ che khuất gốc kính (Lens Soiling/Occlusion Detection) & Bộ lọc Variance of Laplacian (Blur Detection).**
+  * *Tại sao:* Nếu kính camera bị mưa, bùn đất hoặc mạng nhện bám cứng, thuật toán Laplacian sẽ bị đánh lừa bởi bề mặt tĩnh của mạng nhện. Cần liên tục lấy mẫu frame nền, nếu vùng che khuất không đổi quá 1 phút -> Kích hoạt cảnh báo hệ thống (Alert Health) thay vì để YOLO chạy mù. Với các frame mờ do chuyển động, variance của Laplacian vẫn là thuật toán Real-time tốt nhất để drop nhận diện.
 * **Giải pháp 3: Xử lý ánh sáng bằng thuật toán CLAHE (Contrast Limited Adaptive Histogram Equalization).**
   * *Tại sao CLAHE khác biệt với Histogram Equalization (HE) thông thường:* HE phân phối lại độ sáng cho toàn bộ khu vực, nên ở những vùng có nhiễu (noise) thì sẽ bị khuếch đại nhiễu lên mất kiểm soát. CLAHE chia hình ảnh thành các block nhỏ và giới hạn mức độ khuếch đại độ tương phản. Giải quyết triệt để ngược sáng mà không làm suy giảm chất lượng chung.
 
@@ -72,8 +72,8 @@ Tài liệu này cung cấp thiết kế toàn diện cho phân hệ **Nhận di
 3. **Mũ rơi vãi dưới đất, ngay chân công nhân.**
 
 ### 💡 Hướng giải quyết & Dẫn chứng kỹ thuật (Rationale):
-* **Giải pháp 1: Heuristic khu vực giải phẫu đầu (Top 1/4 Body Region).**
-  * *Tại sao gọi đây là thuật giải logic mạnh mẽ:* Không cần dùng mạng Pose Estimation phân tích các khớp xương (cực tốn phần cứng GPU). Bằng phép toán xác định Top 1/4 của Bbox `Person`, ta có Vùng Khả Dĩ chứa đầu. Nếu `Helmet` Bbox không rơi vào vùng này đoạn giao diện (Intersection) == 0 -> Chắc chắn mũ không ở trên đầu (rơi dưới chân, hoặc cầm tay).
+* **Giải pháp 1: Geometric Body Partition thay vì Top 1/4 cố định (Dynamic Head Heuristic).**
+  * *Tại sao không dùng mức tĩnh 1/4:* Nếu công nhân cúi rạp người nhặt gạch (Bounding Box trở thành hình chữ nhật ngang Width > Height), mức chia 1/4 theo chiều dọc sẽ lấy phần lưng/eo thay vì Đầu. Giải thuật cải tiến: Dựa trên tỷ lệ khung hình (Aspect Ratio) của Person_Bbox. Nếu tỷ lệ Width/Height > 1.2 (đang cúi gập ngang), vùng khảo sát cấu trúc đầu bắt buộc nới lỏng sang hai mép rìa thay vì trung tâm trên. Chỉ khi Box thẳng đứng (người đứng/đi bộ), lấy Top 25% chiều cao. Nếu không có giao thoa IoU -> Mũ rơi hoặc cầm tay. Có thể kết hợp Pose Detection siêu nhẹ nhưng tốn kém tài nguyên trong đám đông, nên Geometric Aspect Ratio là hiệu quả nhất.
 * **Giải pháp 2: Giải thuật Hungarian (Hungarian Algorithm) cho bài toán ghép đôi qua IoU/Kích thước.**
   * *Tại sao không dùng thuật toán Láng giềng gần nhất (Nearest Neighbor):* Nếu dùng khoảng cách để nối Mũ với Người, cái mũ ở phía sau có chiều cao tọa độ 2D có thể nằm gần hộp trung tâm (centroid) người B hơn cả người A (người chịu trách nhiệm mũ). Hungarian xây dựng ma trận Chi phí (Cost Matrix) dựa trên tọa độ, diện tích và giải quyết bài toán phân bố tối ưu toàn cục (Global Optimization), bẻ gẫy hiệu ứng ảo ảnh 2D góc máy.
 
