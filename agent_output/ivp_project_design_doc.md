@@ -123,7 +123,67 @@ flowchart LR
 
 ---
 
-## 5. Sơ đồ Khối (Block Diagram)
+## 5. Kiến trúc Phần mềm (Software System Architecture)
+
+Trong khi *System Overview* mô tả việc phân bổ dữ liệu vật lý qua mạng lưới mạng, **Kiến trúc Phần mềm (Software Architecture)** mô tả cách các khối code (mô-đun) bên trong vương quốc phần mềm liên kết với nhau. Hệ thống sử dụng mô hình **Kiến trúc Đa tầng (N-Tier/Layered Architecture)** kết hợp với **Bất đồng bộ (Asynchronous)**. Việc chia tầng (Layering) giúp đạt được tính *Tách biệt mối quan tâm (Separation of Concerns)*.
+
+### 5.1 Giải thích lý luận kiến trúc đa tầng (Technical Rationale)
+Hội đồng thường rất ghét việc gom chung code Xử lý Ảnh, logic lưu Database và API vào trong cùng 1 file mã nguồn duy nhất (Spaghetti code). Bằng cách thiết kế theo N-Tier:
+*   **1. Tầng Giao diện (Presentation Layer):** Triển khai giao diện thuần túy (Flet/Vue...). Đảm bảo tính thân thiện và bảo mật vì không ai có thể can thiệp thẳng vào hệ thống phía sau từ màn hình bảo vệ.
+*   **2. Tầng Ứng dụng & Vận chuyển (Application Layer):** Bọc toàn bộ hệ thống bằng một API Framework (FastAPI/Express). Nhiệm vụ là mở một cổng (Port) duy nhất để chống lại các luồng truy cập trái phép, đồng thời chịu trách nhiệm "bơm" dữ liệu Realtime qua WebSockets.
+*   **3. Tầng Xử lý Nghiệp vụ & Trí tuệ (Business Logic & AI Layer):** Được xem là "khối não". Đặc điểm ăn tiền ở đây là tách biệt API (giao tiếp mạng) với IVP và AI. Khối AI cứ việc chạy ma trận, nhả object về cho Rule Engine. Rule Engine sẽ đóng gói ra Alert gửi lên Application Layer.
+*   **4. Tầng Tiếp cận Dữ liệu (Data Access Layer - DAL):** Tầng này dùng **ORM (Object-Relational Mapping)** để giao tiếp CSDL. Khuyến nghị này là vũ khí tuyệt đối bảo vệ dự án khỏi các lỗi bảo mật nguy hiểm như SQL Injection.
+*   **5. Tầng Lưu trữ Đa mô hình (Persistence Layer):** Sự lai tạo giữa Relational DB (SQL: Lưu lịch sử dài hạn vững chắc), In-memory DB (Redis: Tốc độ chớp nhoáng phục vụ Cooldown/Session), và File System (Lưu ảnh tĩnh).
+
+### 5.2 Sơ đồ Kiến trúc Đa tầng (N-Tier Diagram)
+
+```mermaid
+graph TD
+    classDef layerBox fill:#f9f9f9,stroke:#333,stroke-width:2px,rx:10px,ry:10px;
+    classDef component fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
+
+    subgraph T_1 ["1. Tầng Giao diện (Presentation Layer)"]
+        WEB[Admin Web Dashboard / Desktop App]:::component
+    end
+
+    subgraph T_2 ["2. Tầng Ứng dụng & API (Application Layer)"]
+        API[Backend API - FastAPI/NodeJS]:::component
+        WS[WebSocket Service]:::component
+    end
+
+    subgraph T_3 ["3. Tầng Xử lý Nghiệp vụ & AI (Business Logic Layer)"]
+        RULE[Dynamic Rule Engine]:::component
+        AI[YOLO DL Service]:::component
+        IVP[IVP Classical Filter]:::component
+        
+        IVP --> AI --> RULE
+    end
+
+    subgraph T_4 ["4. Tầng Dữ liệu (Data Access Layer)"]
+        ORM[Bộ ORM Module]:::component
+    end
+
+    subgraph T_5 ["5. Tầng Lưu trữ (Persistence Layer)"]
+        SQL[(PostgreSQL/MySQL SQL)]:::component
+        REDIS[(Redis In-Memory)]:::component
+        DISK[(File Storage)]:::component
+    end
+
+    %% Mũi tên kết nối các tầng giao tiếp dọc
+    WEB <-->|HTTP REST / WSS| API
+    WEB <-->|WSS Realtime| WS
+    
+    T_3 -. Báo cáo JSON .-> API 
+    API <--> ORM
+    
+    ORM <--> SQL
+    ORM <--> REDIS
+    ORM <--> DISK
+```
+
+---
+
+## 6. Sơ đồ Khối (Block Diagram)
 
 Sơ đồ thể hiện khối liên kết vật lý và thư viện.
 
@@ -177,7 +237,7 @@ block-beta
 
 ---
 
-## 6. Sơ đồ Thuật toán Vận hành (Operational Flowchart)
+## 7. Sơ đồ Thuật toán Vận hành (Operational Flowchart)
 
 Thể hiện lưu đồ ra quyết định trên mỗi một khung hình (Frame) riêng lẻ. Cấu trúc để thiết kế hàm thuật toán (Function scope).
 
@@ -218,7 +278,7 @@ graph TD
 
 ---
 
-## 7. Lựa chọn Mô hình Học Sâu & Kịch bản Huấn luyện
+## 8. Lựa chọn Mô hình Học Sâu & Kịch bản Huấn luyện
 1. Lựa chọn Mô hình: **YOLOv8 Nano/Small (n/s).** Mô hình nhỏ kết hợp với việc tiền xử lý sạch sẽ (Pre-processed sạch) có thể vượt qua độ chính xác của YOLOv8 Large mà không chịu sức nặng thuật toán dư thừa.
 2. Nhãn Huấn Luyện (Classes):
     * `0: helmet` (Chiếc mũ cấu trúc an toàn)
