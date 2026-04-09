@@ -50,15 +50,21 @@ graph TD
 
     C4 --> D_Logic(Module Xử lý Nghiệp vụ & Hậu kỳ)
     
-    subgraph PostProcessing [3. Dynamic Rule Engine]
-        D_Logic --> D1[Tính Tỷ lệ khung người Aspect Ratio]
-        D1 --> D2{Đầu có giao thoa với Mũ?}
-        D2 -- Có (IoU > Threshold) --> D3[Safety: An toàn]
-        D2 -- Không / Trống --> D4[Danger: Thiếu Trang bị]
+    subgraph PostProcessing [3. Dynamic Rule Engine - Quy tắc Không gian Động]
+        D_Logic --> D1[Tính Tỷ lệ Aspect Ratio = Chiều Rộng / Chiều Cao Box Người]
+        D1 --> D1_A{Đánh giá Tỷ lệ Góc dáng?}
+        D1_A -- W/H > 1.2 (Đang cúi gập ngang) --> D1_B[Tiên đoán Đầu di chuyển: Mở rộng vùng tìm kiếm sang 2 mép sườn]
+        D1_A -- W/H <= 1.2 (Đứng / Đi bộ thẳng) --> D1_C[Tiên đoán Đầu ở tĩnh: Giới hạn tìm kiếm ở 25% Top trên cùng dọc]
         
-        D3 -. Cập nhật trạng thái .-> D5
-        D4 -. Cập nhật trạng thái .-> D5[Time-Sliding Window]
-        D5 --> D6{Đạt tỷ lệ vi phạm trong 30 frames?}
+        D1_B --> D2{Khu vực được quy hoạch Đầu có bao lấy Box Mũ không?}
+        D1_C --> D2
+        
+        D2 -- Có (IoU > Threshold) --> D3[Safety: An toàn]
+        D2 -- Không / Ở quá xa / Cầm ở tay --> D4[Danger: Thiếu Trang bị]
+        
+        D3 -. Chuyển biến vào Bộ đệm .-> D5
+        D4 -. Chuyển biến vào Bộ đệm .-> D5[Time-Sliding Window buffer = 30 Frames]
+        D5 --> D6{Tích lũy đủ tỷ lệ Vi phạm: 25/30 frames liên tiếp?}
     end
 
     D6 -- Đạt (Xác nhận) --> E_Back(Cập nhật Cơ sở Dữ liệu)
