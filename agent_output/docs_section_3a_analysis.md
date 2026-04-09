@@ -69,8 +69,42 @@ graph TD
         E1 --> E2[Trích xuất Metadata & Crop Bằng chứng]
         E2 --> E3[(Database)]
         E4[Admin Dashboard] <== WebSockets ==> E3
-    end
 ```
+
+### C. Phân tích chi tiết Dòng chảy Dữ liệu (Workflow Analysis)
+Sơ đồ trên mô phỏng vòng đời của một khung hình (frame) độc lập kể từ khi được chụp bởi camera. Một khung hình sẽ đi qua 4 giai đoạn nghiêm ngặt:
+
+1.  **Giai đoạn Tiền xử lý (Data Cleaning):**
+    *   Hệ thống nhận luồng video thô (**Raw Frame**) từ Camera tới máy chủ dạng luồng mạng. Bước đầu tiên thiết yếu là phòng ngự các lỗi truyền tải mạng. **SSIM** được áp dụng để rà xem gói tin có bị rách, sọc ngang dọc hoặc rơi rụng một nửa (**Packet Loss**) không. Nếu có, frame này bị vứt bỏ để không làm "mù" AI.
+    *   Kế đến, toán tử **Laplacian** tính toán mức độ chuyển động. Nếu công nhân chạy vội sinh ra vệt mờ nhòe (**Motion Blur**), frame bị thả trôi. Còn nét, frame vượt qua chốt chặn sẽ được cân chỉnh ánh sáng qua bộ lọc thông minh **CLAHE** để khắc phục nhiễu ngược sáng hoặc dư sáng lóa trắng, tối ưu độ tương phản cho vật thể "Mũ bảo hộ" được rõ nét lên mức tối đa.
+
+2.  **Giai đoạn Suy luận AI (YOLO & Tracking):** 
+    *   Bức ảnh "sạch" đi vào AI Chính. Lưới mạng tích chập **CNN** chạy nhiệm vụ trích xuất đặc trưng vật thể. YOLO phân loại các điểm ảnh này rơi vào phân khúc nhóm là `Person`, `Helmet` hay mũ mồi `Other_Hat`.
+    *   Đồng thời nó quy hoạch các tọa độ góc để vẽ vòng ôm hình hộp (**Bounding boxes**) xác định vị trí thực thể. Máy lấy được hình ảnh người và mũ, sau đó lập tức đẩy qua **BoT-SORT** để theo dõi và cấp phát mã định danh liên tục (**Tracking ID**) giúp cho dù đối tượng bị che khuất tạm thời, hệ thống vẫn nhớ được họ là ai (chứ không phải đếm lại 1 người thành 2 lần vi phạm).
+
+3.  **Giai đoạn Ràng buộc Kịch bản Logic (Dynamic Rule Engine):**
+    *   Hệ thống chạy các thuật toán hình học động. Thay vì chốt cứng vị trí trên cùng hộp người luôn là "Đầu", hệ thống dùng tỷ lệ chiều ngang/chiều dọc của Bounding Box hình người (**Aspect Ratio**) để cảm thấu người đó đang đứng thẳng hay cúi gập cong người (lúc cúi gập thì chiều cao hẹp đi, chiều phình ngang bành ra, đầu sẽ chuồi về vùng cạnh sườn mép ảnh). Ở vùng đỉnh Đầu giả định đó, tính toán tỷ lệ giao thoa **IoU** với hộp Mũ bảo hộ.
+    *   Nếu tỷ lệ đè lên nhau đủ lớn theo ngưỡng yêu cầu (**Threshold**), người này an toàn. Ngược lại kết luận tạm thời là vi phạm. Tuy nhiên, nó đưa phán đoán vào Cửa sổ trượt lấy mẫu **Time-Sliding Window**. Phải có đủ 25 trên 30 khung hình gần đây nhất đều có chung kết luận là Vi phạm thì nó mới Xác nhận (ngừa báo lỗi giả chớp cháy khi người đi qua góc khuất tán cây).
+
+4.  **Giai đoạn Lưu trữ & Giao thức Báo động (Storage & Push Notification):**
+    *   Thay vì dội bom SQL liên tục hàng nghìn lần làm treo máy, nếu ID vi phạm bị bắt, nó được đẩy vào vùng cách ly tạm trên bộ nhớ tĩnh RAM (**In-Memory Cooldown_Cache**). ID này sẽ bị im lặng thông báo trong tầm 3-5 phút tới nếu tái lặp.
+    *   Hệ thống lúc này ra sức cắt ảnh chân dung người vi phạm (Crop) rồi chèn các thông tin chữ đi kèm (**Metadata**), đẩy về CSDL (**Database**). 
+    *   Nhờ cổng **WebSockets**, giao diện người trực ở trạm canh (Dashboard) giật báo động đỏ popup Real-time không có độ trễ tải trang.
+
+### D. Giải thích Thuật ngữ Kỹ thuật Viết tắt nằm trong Lưu đồ
+*   `RTSP (Real Time Streaming Protocol)`: Giao thức mạng cho phép truyền hình ảnh video theo dòng (stream) từ IP Camera đến máy xử lý với tốc độ trễ siêu thấp (Tốt hơn HTTP).
+*   `SSIM (Structural Similarity Index Measure)`: Một chỉ số đo lường nâng cao (khác với đo điểm ảnh thô bằng MSE) dùng để đối chiếu sự nguyên hình cấu trúc gốc trong xử lý ảnh kỹ thuật số. Cốt lõi của việc ngăn cản hình ảnh suy hao vỡ nát do tín hiệu mạng yếu đi sâu vào mạng model.
+*   `Packet Loss`: Sự mất mát gói tin. Camera đi bằng cáp LAN hoặc Wifi, khi rớt băng thông, dữ liệu không đến đủ làm khung video rách màn hình xám xịt một phía.
+*   `CLAHE (Contrast Limited Adaptive Histogram Equalization)`: Cân bằng Histogram cục bộ giới hạn tương phản. Kỹ thuật chia ảnh làm nhiều ô vuông nhỏ (8x8 tile) và tự tối ưu sáng-tối cho riêng ô vuông đó. Rất hữu hình với hiện tượng ngược sáng công trường.
+*   `CNN (Convolutional Neural Network)`: Lớp Nơ-ron tích chập. Nền tảng cốt lõi của Trí tuệ AI Thị giác máy tính nhận diện hình ảnh. Hoạt động trên dạng các hạt nhân trịch xuất ma trận.
+*   `BoT-SORT (Bag of Tricks for Simple Online and Realtime Tracking)`: Thuật toán Tracking đối tượng hạng nặng tối ưu tốt nhất hiện giờ, vượt qua DeepSORT do có cơ chế kết hợp với quán tính camera di chuyển và dự phóng bù đắp mất vùng che khuất (Kalman Filter tích hợp Motion bù trừ).
+*   `Aspect Ratio`: Tỷ lệ khung (Thường là `Chiều Rộng / Chiều Cao` của bounding box người).
+*   `IoU (Intersection over Union)`: Tỷ số diện tích giao thoa tính bằng $\frac{Diện tích phần Giao Cắt}{Diện tích phần Khối Chóp tổng thể}$. Nếu Bbox của cái mũ nằm trọn vớt gọn trên Bbox người ở khu vực đỉnh thì IoU tiến gần 1. 
+*   `Threshold`: Giá trị Ngưỡng ranh giới lập trình. Nó giống như bộ lề cài đặt để ra quyết định Logic `IF...ELSE`.
+*   `Time-Sliding Window`: Kỹ thuật Cửa sổ trượt qua thời gian mảng phần tử. Nó tạo một dãy Array gồm chiều dài N frame. Khi Frame mới tràn vào, đẩy frame cũ nhất ra khỏi dãy mảng để giữ tính kế thừa thời gian liên tục và bù đắp suy đoán nhiễu gãy (Flickering Filtering).
+*   `In-Memory Cooldown_Cache`: Bộ nhớ Cache trên RAM hệ thống (Ví dụ kinh điển là Redis). Dùng RAM để cản dòng rác vì đọc/ghi RAM đạt ngưỡng Mili-giây trong khi chọc SQL ở Ổ đĩa Disk rất tốn IOPS và làm đứng máy.
+*   `Metadata`: Siêu dữ liệu mô tả thuộc tính. Ở đây là tổ hợp các Object JSON (Ví dụ: Máy ảnh số 1, Ngày 15/05/2026, Độ tin cậy Model 0.98, Vi phạm...).
+*   `WebSockets`: Giao thức TCP hai chiều kết nối duy trì mở. Khác HTTP ở việc client không cần gõ Request liên tục (Pull) mà Server khi có tin mới dội chủ động xịt (Push) về Client. Do đó màn hình quản lý nảy báo động trong 1% Giây.
 
 ---
 
