@@ -1,0 +1,1272 @@
+SAFETY DETECTION REPORT
+Report 2 – Software Design Document
+– Hanoi, August 2025 –
+Table of Contents
+I. Record of Changes5
+II. Software Design Document6
+1. System Design6
+1.1 System Architecture6
+1.2  FE Package Diagram7
+1.3  BE Package Diagram8
+2. Database Design11
+2.1.Table Descriptions11
+2.2. Brands14
+2.3. CartItems14
+2.4. Coupons14
+2.5. CouponUsages15
+2.6. MenuCategories16
+2.7. MenuItemCategories16
+2.8. MenuItems16
+2.9. MenuItemVariants17
+2.10. OrderDetails17
+2.11. Orders18
+2.12. OrderWraps19
+2.13. PromotionItemConditions19
+2.14. Promotions19
+2.15. RoleClaims21
+2.16. Roles21
+2.17. Stores21
+2.18. StoreSettings22
+2.19. Tables23
+2.20. UserClaims23
+2.21. UserLogins24
+2.22. UserRefreshTokens24
+2.23. UserRoles24
+2.24. Users25
+2.25. UserStores26
+2.26. UserTokens26
+2.27. Feedbacks27
+2.28. MenuItemImages27
+2.29. MenuItemVariantGroups28
+2.30. MenuItemVariantGroupItems28
+2.31. MobileTokenDevices29
+2.32. PaymentAccounts30
+2.33. SystemConfigurations30
+2.34. VariantGroups31
+2.35. Workshifts31
+2.36. WorkshiftSchedules32
+2.37. StaffWorkshiftRegistrations32
+3. Detailed Design34
+3.1. Authentication34
+3.2. Promotion Management39
+3.3. Coupon Management48
+3.4. Menu Item Management57
+3.5. Category Management64
+3.6. Staff Management70
+3.7. Profile Management80
+3.8. Table Management82
+3.9. Brand Management91
+3.10. Store Management96
+3.11. Payment Management102
+3.12. Feedback Management106
+3.13. Cart Management110
+3.14. Kitchen Management111
+3.15. Order Management112
+3.16. Workshift Management116
+I. Record of Changes
+Date
+A*M, D
+In charge
+Change Description
+06/4/2026
+A
+Sonhx
+Add document background
+*A - Added M - Modified D - Deleted
+II. Software Design Document
+1. System Design
+1.1 System Overview
+Figure 4.1 System overview
+1.2 System Architecture
+Figure 4.2 System architecture
+1.3 Deployment diagram
+Figure 4.3 Deployment diagram
+1.2  FE Package Diagram
+1.2.1. FE Package Diagram 
+Figure 4.4 FE Package diagram
+1.2.2. Package descriptions
+No
+Package
+Description
+01
+store
+The store package is a centralized state management module. It contains reusable components like actions, sagas, and slices to organize, handle logic, and maintain consistent application state.
+02
+routes
+The routes package is responsible for managing application navigation. It contains reusable configurations and components that define the structure and behavior of different pages and views, helping to organize and maintain the application's flow.
+03
+pages
+The pages package contains the main components for each page or screen. These components are responsible for fetching data from APIs and combining various UI components to form a complete user interface. This approach centralizes the data fetching and view logic for each distinct page.
+04
+service
+The services package contains functions dedicated to interacting with external APIs and handling other business logic.
+05
+components
+Includes reusable UI components that are used across different pages and parts of the application, such as buttons, forms, and modals.
+06
+api
+The api package contains the API endpoints and related configurations.
+07
+layout
+The layout package contains the foundational components for the application's overall structure, such as headers, footers, sidebars, and main content wrappers. This package ensures a consistent look and feel across the application by providing reusable templates for page composition.
+08
+type
+Contains shared type definitions and interfaces used across the application.
+09
+styles
+Includes global styles, variables and reusable styling resources used across the application.
+10
+hooks
+Contains reusable custom React hooks for handling application logic.
+Table 4.1  FE Package descriptions
+1.3  BE Package Diagram
+1.3.1. BE Package Diagram 
+Figure 4.5 BE Package diagram
+1.3.2. Package descriptions
+No
+Package
+Description
+01
+Deploy & CICD
+Contains deployment and CI/CD automation files: .dockerignore, Dockerfile, docker-compose.yml, and GitHub Actions workflow for build, test, and deployment pipelines.
+02
+Presentation Layer
+Exposes APIs and handles request/response cycle: Controllers (REST API endpoints), Exception Handling Middleware (centralized error handling), and Program Entry (application startup).
+03
+Application Layer
+Core business logic: Service (business operations), Strategies (processing strategies), Background Services (asynchronous jobs), DTOs (data transfer objects), Mapping Profiles (AutoMapper config). Also includes SMS Gateway and Payment Gateway integrations for communication with external services.
+04
+Domain/Contracts Layer
+Defines contracts and domain rules: Constants & Enums, Custom Exceptions & Errors, Helpers, Interfaces, Models & Utilities. Keeps business rules and definitions independent from infrastructure.
+05
+Infrastructure Layer
+Manages data persistence and identity:
+• Order Database → Order Context & Factory, Entities, Migrations.
+• Identity → Repositories & Unit of Work, Entities, DbSeed & Context. Provides a foundation for persistence and authentication.
+06
+Realtime Hubs
+Provides real-time communication channels (e.g., SignalR/WebSockets): Cart Hub, Order Hub, Notify Hub.
+07
+Messaging
+Handles event-driven messaging and push notifications:
+• RabbitMQ → Constants, Consumers, Services (message broker for async processing).
+• Firebase → Configuration & Services (push notifications, real-time sync).
+Table 4.2 BE Package descriptions
+1.4  Flow Chart
+2. Database Design
+Figure 4.6 Database design
+2.1.Table Descriptions
+No
+Entity
+Description
+01
+sites
+Top-level deployment sites (e.g., construction yards or facilities). Stores human-readable name, stable business code, and default timezone. Each site owns many zones and cameras.
+2
+zones
+Logical areas within a site (e.g., excavation zone, gate). Linked to sites; used to group cameras for reporting and to annotate where events occurred.
+3
+cameras
+Individual RTSP cameras tied to a site and optionally a zone. Holds stream endpoint reference, operational status, and configured frame rate / resolution metadata.
+4
+safety_criteria
+Catalog of enforceable safety/PPE criteria (e.g., missing helmet, missing reflective vest). Each row defines a stable code, display name, default severity, and whether the criterion is globally active. Multiple rule_definitions and violations reference one criterion.
+5
+rule_definitions
+Versioned rule packs for a safety_criterion. The definition JSON binds YOLO class names to evaluation logic (IoU, geometry, voting parameters). Allows rule changes without altering core tables; violations and rule_evaluations may reference the rule version used.
+6
+camera_criterion_assignments
+Per-camera configuration of which safety_criteria are enabled, with optional override of rule_definitions. Models “turn criteria on/off per camera” without schema migration.
+7
+model_versions
+Registry of YOLO checkpoints: name, semantic version, declared classes JSON, and suggested thresholds. processing_runs and detections reference the model that produced outputs.
+8
+processing_runs
+One processing session for a camera stream (start/end time, status). Stores a config_snapshot of runtime thresholds and tracker settings so results can be reproduced or audited later. Parent for preprocess logs, detections, rule evaluations, and violations tied to that run.
+9
+frame_preprocessing_logs
+Per-frame (or sampled) pre-inference quality records for a processing_run: SSIM, blur metric, CLAHE flag, pass/drop state and reason. Explains which frames reached the detector and why others were discarded.
+10
+detections
+Raw model output per frame: class_name, bounding box, confidence, optional track_id, linked to camera and optionally processing_run / model_version. Feeds the rule engine and forensic replay.
+11
+rule_evaluations
+Intermediate rule-engine decisions per criterion, camera, time, and track_id: sliding-window vote counts, decision (safe, danger, cooldown skip, etc.), and criterion-specific scores (primary_iou, details). Bridges detections and confirmed violations.
+12
+violations
+Confirmed business events after validation (e.g., sustained missing PPE). References camera, site, optional zone, safety_criterion, and rule_definition; stores confirmation time, voting summary, frozen rule_snapshot, and optional geometry/metrics for audit.
+13
+violation_evidences
+Evidence artifacts for a violation: image storage path/checksum, capture time, person and equipment bounding boxes (and legacy helmet box), plus meta for review workflows.
+14
+alerts
+Notification delivery log for a violation (channel, send time, delivery status, provider response). Supports tracing WebSocket, mobile push, email, or SMS attempts.
+15
+camera_health_logs
+Operational health events for a camera (stream glitches, low FPS, decoder errors, occlusion). Separate from safety violations; used for monitoring and maintenance.
+Table 4.3.1 Table descriptions
+2.2. sites
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the site.
+2
+Code
+nvarchar(64)
+x
+x
+Stable business code used in APIs and reports.
+3
+Name
+nvarchar(256)
+x
+Human-readable site name.
+4
+Timezone
+nvarchar(128)
+x
+Default IANA timezone (e.g., `Asia/Ho_Chi_Minh`) for display and local boundaries.
+5
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp (UTC recommended).
+6
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp (UTC recommended).
+Table 4.3.9 Table “sites” descriptions
+2.3. zones
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the zone.
+2
+SiteId
+uniqueidentifier
+x
+FK -> sites.Id
+Owning site.
+3
+Code
+nvarchar(64)
+x
+Zone code; must be unique together with `SiteId` (composite unique index).
+4
+Name
+nvarchar(256)
+x
+Display name of the zone.
+5
+Description
+nvarchar(max)
+Optional free-text description.
+6
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+7
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp.
+Table 4.3.2 Table “zones” descriptions
+2.4. cameras
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the camera.
+2
+SiteId
+uniqueidentifier
+x
+FK -> sites.Id
+Site where the camera is installed.
+3
+ZoneId
+uniqueidentifier
+FK -> zones.Id
+Optional zone assignment for reporting.
+4
+Code
+nvarchar(64)
+x
+Camera code; unique together with `SiteId` (composite unique index).
+5
+Name
+nvarchar(256)
+x
+Display name (e.g., “Gate 1 west”).
+6
+RtspUrl
+nvarchar(max)
+RTSP URL or connection string; store encrypted or in a secret manager in production.
+7
+Status
+nvarchar(32)
+x
+Operational state: `active`, `inactive`, `maintenance`, etc.
+8
+FpsConfig
+int
+Target or configured frames per second for the pipeline.
+9
+ResolutionW
+int
+Optional frame width in pixels.
+10
+ResolutionH
+int
+Optional frame height in pixels.
+11
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+12
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp.
+Table 4.3.3 Table “cameras” descriptions 
+2.5. safety_criteria
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the criterion.
+2
+Code
+nvarchar(64)
+x
+x
+Stable machine code (e.g., `NO_HELMET`, `NO_REFLECTIVE_VEST`).
+3
+Name
+nvarchar(256)
+x
+Display name for UI and reports.
+4
+Description
+nvarchar(max)
+Optional explanation of the criterion.
+5
+IsActive
+bit
+x
+When `0`, criterion is disabled for new assignments; historical FK rows remain valid.
+6
+SortOrder
+int
+x
+Display ordering in admin UI.
+7
+DefaultSeverity
+int
+x
+Default severity level when a violation is raised under this criterion.
+8
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+9
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp.
+Table 4.3.4 Table “safety_criteria” descriptions
+2.6. rule_definitions
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+No
+Field Name
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the rule definition row.
+2
+CriterionId
+uniqueidentifier
+x
+FK -> safety_criteria.Id
+Criterion this rule evaluates.
+3
+Code
+nvarchar(128)
+x
+Stable rule identifier (e.g., `helmet_head_iou`); unique per criterion with `Version`.
+4
+Version
+nvarchar(32)
+x
+Semantic version string (e.g., `1.0.0`).
+5
+Name
+nvarchar(256)
+x
+Human-readable rule name.
+6
+IsActive
+bit
+x
+Whether this rule version may be selected by runtime.
+7
+IsDefault
+bit
+x
+Marks the default rule pack for the criterion when no per-camera override exists.
+8
+Definition
+nvarchar(max)
+x
+JSON: YOLO class names, anchor class, IoU thresholds, voting window, geometry hints, etc.
+9
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+Table 4.3.5 Table “rule_definitions” descriptions
+2.7. camera_criterion_assignments
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the assignment row.
+2
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Camera receiving the policy.
+3
+CriterionId
+uniqueidentifier
+x
+FK -> safety_criteria.Id
+Criterion to enforce or disable.
+4
+IsEnabled
+bit
+x
+When `0`, this criterion is off for this camera.
+5
+RuleDefinitionId
+uniqueidentifier
+FK -> rule_definitions.Id
+Optional override; if null, runtime uses the criterion’s default active rule.
+6
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+7
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp.
+Table 4.3.6 Table “camera_criterion_assignments” descriptions
+2.8. model_versions
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the model checkpoint.
+2
+Name
+nvarchar(128)
+x
+Model family or artifact name; unique together with `Version`.
+3
+Version
+nvarchar(64)
+x
+Checkpoint version label.
+4
+Classes
+nvarchar(max)
+JSON array of YOLO class labels emitted by this checkpoint.
+5
+ConfidenceThreshold
+decimal(5,4)
+Suggested default confidence threshold for inference.
+6
+IouThreshold
+decimal(5,4)
+Suggested default IoU for NMS / pairing (implementation-specific).
+7
+IsActive
+bit
+x
+Whether this row is a candidate “current” model in admin workflows.
+8
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+Table 4.3.7 Table “model_versions” descriptions
+2.9. processing_runs
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the stream processing session.
+2
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Camera being processed.
+3
+ModelVersionId
+uniqueidentifier
+FK -> model_versions.Id
+Model used for this run, if recorded.
+4
+StreamStartedAt
+datetime2(7)
+x
+Session start time.
+5
+StreamEndedAt
+datetime2(7)
+Session end time when stopped gracefully or on failure.
+6
+Status
+nvarchar(32)
+x
+`running`, `success`, `failed`, `stopped`, etc.
+7
+ConfigSnapshot
+nvarchar(max)
+JSON snapshot of thresholds, voting, cooldown, tracker settings for audit/replay.
+8
+ErrorMessage
+nvarchar(max)
+Populated when `Status` indicates failure.
+9
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+10
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp.
+Table 4.3.8 Table “processing_runs” descriptions
+2.10. frame_preprocessing_logs
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+bigint
+x
+x
+PK
+Surrogate primary key (identity).
+2
+RunId
+uniqueidentifier
+x
+FK -> processing_runs.Id
+Processing session.
+3
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Redundant camera key for partition/query convenience.
+4
+FrameTs
+datetime2(7)
+x
+Timestamp of the frame in stream time.
+5
+FrameSeq
+bigint
+Optional monotonic frame sequence within the run.
+6
+SsimScore
+decimal(6,5)
+Structural similarity metric for anti-glitch / tear detection.
+7
+LaplacianVar
+decimal(10,4)
+Blur metric (variance of Laplacian).
+8
+ClaheApplied
+bit
+x
+Whether CLAHE lighting adjustment was applied before inference.
+9
+QualityState
+nvarchar(32)
+x
+`passed`, `dropped_glitch`, `dropped_blur`, `dropped_other`, etc.
+10
+DropReason
+nvarchar(64)
+Reason when the frame was dropped (e.g., `rtsp_glitch`, `motion_blur`).
+11
+Extra
+nvarchar(max)
+Optional JSON for additional preprocess metrics.
+12
+CreatedAt
+datetime2(7)
+x
+Row insertion time (ingest time).
+Table 4.3.10 Table “frame_preprocessing_logs” descriptions
+2.11. detections
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+bigint
+x
+x
+PK
+Surrogate primary key (identity).
+2
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Source camera.
+3
+RunId
+uniqueidentifier
+FK -> processing_runs.Id
+Optional link to the processing session.
+4
+ModelVersionId
+uniqueidentifier
+FK -> model_versions.Id
+Model that produced the detection.
+5
+FrameTs
+datetime2(7)
+x
+Frame timestamp.
+6
+FrameSeq
+bigint
+Optional frame index within the run.
+7
+TrackId
+nvarchar(64)
+Tracker-assigned ID; not a real person identity.
+8
+ClassName
+nvarchar(128)
+x
+YOLO class label (e.g., `person`, `helmet`, `reflective_vest`).
+9
+Confidence
+decimal(5,4)
+Class confidence score.
+10
+BboxX1
+int
+x
+Bounding box left (pixels).
+11
+BboxY1
+int
+x
+Bounding box top (pixels).
+12
+BboxX2
+int
+x
+Bounding box right (pixels).
+13
+BboxY2
+int
+x
+Bounding box bottom (pixels).
+14
+IsEdgeTruncated
+bit
+x
+Whether the box touches image border (quality hint).
+15
+Extra
+nvarchar(max)
+Optional JSON (e.g., raw model aux outputs).
+16
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+Table 4.3.11 Table “detections” descriptions
+2.12. violations
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the confirmed violation event.
+2
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Camera where the violation was observed.
+3
+SiteId
+uniqueidentifier
+x
+FK -> sites.Id
+Denormalized site for fast filtering/reporting.
+4
+ZoneId
+uniqueidentifier
+FK -> zones.Id
+Optional zone at confirmation time.
+5
+RunId
+uniqueidentifier
+FK -> processing_runs.Id
+Optional processing session link.
+6
+CriterionId
+uniqueidentifier
+x
+FK -> safety_criteria.Id
+Which safety criterion was violated.
+7
+RuleDefinitionId
+uniqueidentifier
+FK -> rule_definitions.Id
+Rule version that produced the confirmation.
+8
+TrackId
+nvarchar(64)
+x
+Tracker ID associated with the person/object track.
+9
+Severity
+int
+x
+Effective severity for this event (may differ from criterion default).
+10
+StartedAt
+datetime2(7)
+x
+When the violating state began (per business rules).
+11
+ConfirmedAt
+datetime2(7)
+x
+When sliding-window / cooldown logic confirmed the violation.
+12
+EndedAt
+datetime2(7)
+When the violating episode ended, if tracked.
+13
+Status
+nvarchar(32)
+x
+Workflow state: `open`, `acknowledged`, `resolved`, `ignored`, etc.
+14
+CooldownUntil
+datetime2(7)
+Suppress duplicate alerts until this time when using cooldown.
+15
+VoteTotalFrames
+int
+x
+Frames considered in the confirmation window.
+16
+VoteViolationFrames
+int
+x
+Frames counted as violating within the window.
+17
+AspectRatio
+decimal(8,5)
+Optional person aspect ratio for helmet/head-style rules.
+18
+HeadRegionBbox
+nvarchar(max)
+Optional JSON bbox for inferred head region (helmet-type rules).
+19
+PrimaryIou
+decimal(5,4)
+Main overlap score (criterion-dependent: helmet-head, vest-torso, etc.).
+20
+EvaluationMetrics
+nvarchar(max)
+JSON for additional numeric scores per criterion.
+21
+RuleSnapshot
+nvarchar(max)
+Frozen JSON of effective rule parameters at confirmation time.
+22
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+23
+UpdatedAt
+datetime2(7)
+x
+Row last update timestamp.
+Table 4.3.12 Table “violations” descriptions
+2.13. rule_evaluations
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+bigint
+x
+x
+PK
+Surrogate primary key (identity).
+2
+RunId
+uniqueidentifier
+FK -> processing_runs.Id
+Optional session link.
+3
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Camera under evaluation.
+4
+CriterionId
+uniqueidentifier
+x
+FK -> safety_criteria.Id
+Criterion being evaluated.
+5
+RuleDefinitionId
+uniqueidentifier
+FK -> rule_definitions.Id
+Rule version in use, if resolved.
+6
+FrameTs
+datetime2(7)
+x
+Frame timestamp for this evaluation row.
+7
+FrameSeq
+bigint
+Optional frame sequence.
+8
+TrackId
+nvarchar(64)
+x
+Track under evaluation.
+9
+RuleCode
+nvarchar(128)
+x
+Denormalized `rule_definitions.Code` for fast filtering.
+10
+VoteWindow
+int
+x
+Sliding window size (frames).
+11
+VotePositive
+int
+x
+Count of frames voting toward violation (or rule-specific meaning).
+12
+VoteNegative
+int
+x
+Count of frames voting against violation (or rule-specific meaning).
+13
+Decision
+nvarchar(32)
+x
+`safe`, `danger`, `cooldown_skip`, `insufficient_evidence`, etc.
+14
+PrimaryIou
+decimal(5,4)
+Criterion-dependent primary overlap score.
+15
+AspectRatio
+decimal(8,5)
+Optional geometry metric for head/person rules.
+16
+Details
+nvarchar(max)
+JSON for debug: matched boxes, thresholds, intermediate flags.
+17
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+Table 4.3.13 Table “rule_evaluations” descriptions
+2.14. violation_evidences
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+uniqueidentifier
+x
+x
+PK
+Primary key for the evidence row.
+2
+ViolationId
+uniqueidentifier
+x
+FK -> violations.Id
+Parent violation.
+3
+CaptureTs
+datetime2(7)
+x
+Timestamp of the captured frame used as evidence.
+4
+ImagePath
+nvarchar(max)
+x
+File path or object-storage key for the cropped or full-frame image.
+5
+ImageSha256
+nvarchar(64)
+Optional SHA-256 of the image bytes for integrity.
+6
+Width
+int
+Image width in pixels.
+7
+Height
+int
+Image height in pixels.
+8
+PersonBbox
+nvarchar(max)
+JSON bounding box for the person region.
+9
+EquipmentBbox
+nvarchar(max)
+JSON bounding box for PPE/equipment (helmet, vest, gloves, etc.).
+10
+HelmetBbox
+nvarchar(max)
+Legacy JSON bbox for helmet-only flows; prefer `EquipmentBbox`.
+11
+Meta
+nvarchar(max)
+JSON metadata (scores, labels, crop policy).
+12
+CreatedAt
+datetime2(7)
+x
+Row creation timestamp.
+Table 4.3.14 Table “violation_evidences” descriptions
+2.15. alerts
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+bigint
+x
+x
+PK
+Surrogate primary key (identity).
+2
+ViolationId
+uniqueidentifier
+x
+FK -> violations.Id
+Violation that triggered the notification.
+3
+Channel
+nvarchar(32)
+x
+Delivery channel: `websocket`, `mobile`, `email`, `sms`, etc.
+4
+SentAt
+datetime2(7)
+x
+When the send was attempted or queued.
+5
+DeliveryStatus
+nvarchar(32)
+x
+`queued`, `sent`, `failed`, etc.
+6
+Response
+nvarchar(max)
+JSON or text payload from the provider (message id, error body).
+Table 4.3.15 Table “alerts” descriptions
+2.16. camera_health_logs
+No
+Field Name 
+Type
+Unique
+Not Null
+PK/FK
+Description
+1
+Id
+bigint
+x
+x
+PK
+Surrogate primary key (identity).
+2
+CameraId
+uniqueidentifier
+x
+FK -> cameras.Id
+Camera reporting the health event.
+3
+LoggedAt
+datetime2(7)
+x
+Event time.
+4
+EventType
+nvarchar(64)
+x
+e.g., `rtsp_glitch`, `lens_occlusion`, `low_fps`, `decoder_error`.
+5
+Level
+nvarchar(16)
+x
+`info`, `warn`, `error`.
+6
+Message
+nvarchar(max)
+Human-readable detail.
+7
+Metrics
+nvarchar(max)
+JSON numeric context (FPS, dropped frames, error codes).
+Table 4.3.16 Table “camera_health_logs” descriptions
+3. Detailed Design
+Authentication
+Class Diagram
+Sign In
+Sign Up
+Change Password
+Forgot Password
+Sign Out
+Promotion Management
+Class Diagram
+Create Promotion
+List Promotion
+Get Promotion Detail  
+Update Promotion 
+Delete Promotion 
+Activate Promotion 
+Deactivate Promotion 
+Coupon Management
+Class diagram
+Create Coupon 
+Update Coupon 
+Delete Coupon 
+List Coupon 
+Detail Coupon
+Assign Coupons to Promotion 
+Get Usage Report Coupon 
+Set Coupon Condition
+ Menu Item Management
+Class Diagram
+List Menu Items 
+Create Menu Item 
+Update Menu Item
+View Menu Item Detail 
+Delete Menu Item
+Set Menu Item Status
+ Category Management
+Class Diagram
+Create Category
+List Category
+View Category Detail
+Update Category
+Set Category Status
+Staff Management
+Class Diagram
+Get List Staff
+Add New Staff
+Get Staff Profile
+Update Staff Profile
+Remove Staff
+Activate Staff Profile
+Deactivate Staff Profile
+Add Staff Role
+Remove Staff Role
+Profile Management
+Class Diagram
+Get My Profile
+Update Profile
+ Table Management
+Class Diagram
+Create Table
+List Table
+View Table Detail
+Update Table
+Delete Table
+Set Table Status
+Generate Qr Code For Table
+Brand Management
+Class Diagram
+List Brand 
+Create Brand 
+Get Brand Detail          
+Update Brand 
+Delete Brand
+Store Management
+Class Diagram
+List Store 
+Create Store 
+Update Store
+Delete Store
+Get Store Setting Details
+Update Store Setting
+Payment Management
+Class Diagram
+Create Payment
+Update Config Payment
+Generate Payment Link
+Feedback Management
+Class Diagram
+Create Feedback
+List Feedback
+View Feedback Detail By Order
+View Feedback Detail By Menu Item
+Cart Management
+3.13.1 Add or Update to Cart
+3.13.2 Delete Item in Cart
+3.13.3 Refresh Cart
+3.13.4 Clear Cart
+Kitchen Management
+3.14.1 List Production Order
+3.14.2 Mark as Done
+Order Management
+3.15.1 Create Order
+3.15.2 Cancel Order
+3.15.3 View order
+3.15.4 Mark as done
+Workshift Management
+ Class Diagram
+ List Workshift
+ Create WorkShift
+ Get WorkShift Detail
+ Delete WorkShift
