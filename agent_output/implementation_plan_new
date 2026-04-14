@@ -1,0 +1,86 @@
+# Thiết kế Tích hợp & Phân Tích Edge Cases (Nghiệp vụ Nhận diện Mũ & Demo 3 Live Cams)
+
+Dưới góc nhìn của **Party Mode (Architect + Edge Case Hunter)**, kế hoạch này đáp ứng trực tiếp 4 yêu cầu cốt lõi của bạn: Tập trung bắt các lỗi ngạch (Exceptions/Edge Cases) của thuật toán detect mũ, nguyên vẹn cấu trúc Tiền xử lý (Preprocessing), đề xuất đấu nối C# WinForms chuyên nghiệp, và kiến trúc Demo 3 camera điện thoại.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Về việc hiển thị Live Stream lên WinForms Dashboard**: Backend C# thuần túy không thể bắt luồng Frame từ Python qua Memory được.
+> Hướng tốt nhất là Python sẽ host một luồng **MJPEG Stream** nhẹ (qua Flask/FastAPI). WinForms UI sẽ cập nhật Component `picCameraPreview` để pull luồng Stream đó về. Bạn xem kỹ mục Kiến trúc Tích hợp.
+
+---
+
+## 1. BMad: Edge Case Hunter Review (Phân tích Điểm Mù Phát hiện Mũ)
+
+Dưới sự đánh giá của Kỹ năng Edge Case, tôi đã phân tích `helmet_pipeline.py` và `helmet_violation.py` để tìm các Use-case và Exception rẽ nhánh chưa được lường trước. Tôn chỉ: **Không phá vỡ Pipeline AI hiện tại**.
+
+```json
+[
+  {
+    "location": "helmet_violation.py:build_head_roi",
+    "trigger_condition": "Person bending over or sitting (Squat/Bend pose)",
+    "guard_snippet": "Use dynamic ratio based on Aspect Ratio instead of fixed HEAD_ROI_RATIO=0.35",
+    "potential_consequence": "Head ROI covers stomach/back instead of head, missing helmet entirely"
+  },
+  {
+    "location": "helmet_violation.py:build_head_roi",
+    "trigger_condition": "Camera partial view (only torso/hands visible in frame)",
+    "guard_snippet": "Check if person_box touches bottom edges; fallback geometry logic",
+    "potential_consequence": "Head ROI catches hands holding a helmet, yielding False Positive SAFE"
+  },
+  {
+    "location": "helmet_violation.py:calculate_overlap_ratio",
+    "trigger_condition": "Two people standing very close (Occlusion / Hugging)",
+    "guard_snippet": "Match helmet strictly by nearest geometric center distance (Euclidean)",
+    "potential_consequence": "Person A's helmet falsely falls into Person B's Head ROI (False Negative)"
+  },
+  {
+    "location": "helmet_violation.py:analyse_head_roi_material",
+    "trigger_condition": "Camera Glare/Pitch black removes V channel contrast (stretch_range < 1.0)",
+    "guard_snippet": "if stretch_range < 1.0: return fallback boolean avoiding override logic",
+    "potential_consequence": "M-score divides by zero/0.0 -> valid dark helmets rejected as violations"
+  },
+  {
+    "location": "helmet_pipeline.py:WorkerSafetyPipeline.run",
+    "trigger_condition": "PreProcessor consistently drops frames (accepted=False) during running/motion blur",
+    "guard_snippet": "Retain previous YOLO tracking states temporally for a grace period",
+    "potential_consequence": "Track ID terminates; validation window resets, suppressing alerts"
+  },
+  {
+    "location": "helmet_pipeline.py:HelmetSystem._run_joint_detection_and_tracking",
+    "trigger_condition": "Track ID switch when subject passes behind large obstacles (Pillars)",
+    "guard_snippet": "Implement spatial Re-ID fallback to merge overlapping Tracks",
+    "potential_consequence": "Person evades the 24-frame violation rule by resetting ID halfway"
+  }
+]
+```
+
+**Nhận định chung (Tiêu chí 1 & 2):** 
+Bạn hoàn toàn có thể "vá" các exception này mà không làm ảnh hưởng tới Pipeline gốc. Lớp Tiền xử lý ảnh gốc (`preprocessor.py` chứa thuật toán SSIM/CLAHE/Laplacian Blur) hiện tại vẫn là chốt chặn hoàn hảo ở đầu vòng lặp. Nó vẫn có 100% không gian/nguồn lực (đất diễn) để cản các frame rác nhiễu trước khi Yolo model chạy.
+
+---
+
+## 2. Kiến trúc Tích hợp Hiện thực (Python Pipeline <-> C# WinForms)
+
+WinForms Dashboard (`Form1.cs`) hiện đang mô phỏng Vi phạm ngẫu nhiên qua biến Timer `SimTimer_Tick`. Để Integrate thành hệ thống Live thật sự:
+
+### Python Pipeline (Node) -> Hoạt động Độc Lập
+1. Bọc Class `HelmetSystem` dứoi 1 Microservice Python Web (VD: FastAPI).
+2. **Video Streaming Route (`/stream`)**: Render vòng lặp và cung cấp giao thức **MJPEG (Motion JPEG)**. Frame (ảnh) sau khi vẽ Box xong (ở bước `_annotate_frame`) được đẩy trả về HTTP stream.
+3. **Trigger Alert**: Đoạn `if official_alert:` thay vì chỉ in nhãn, Python sẽ gọi Async HTTP POST sang Endpoint C#: `/api/Violations` đính kèm Evidence (Ảnh/Track Data).
+
+### C# WinForms Dashboard -> Hoạt động Hứng (Pull & Consume)
+1. **Dữ liệu Log Warning**: Hàm `btnSimulate_Click` sẽ được Code lại: Khởi động 1 `Timer` (Polling C#) cứ 1 giây gửi REST GET gọi Server API C# lấy danh sách Violations mới nhất điền vào DataGrid / Text Log. (Bỏ Mock Object `Guid.NewGuid`).
+2. **Xem Live Cam**: Cần nâng cấp Frame `picCameraPreview`. Không thể nhét file video chạy thẳng vào PictureBox. Bắt buộc dùng WebClient/MjpegProcessor SDK (vd `AForge.Video`) để render cái EndPoint IP của FastAPI `/stream`.
+
+---
+
+## 3. Kịch bản Demo Thực Tế: 3 Site - 3 Điện Thoại Livestream
+
+Kịch bản rất lý tưởng để Demo đồ án/dự án doanh nghiệp. Bạn không cần mua Webcam hay Camera đắt tiền:
+
+1. **Chuẩn bị Mobile Endpoint:** Cài App `IP Webcam` (hoặc `DroidCam`) lên 3 điện thoại có chung mạng Wifi/LAN.
+2. Bật Livestream trên App -> Lấy 3 URL (Ví dụ: `http://192.168.1.10:8080/video`, IP `.11` và `.12`). Mỗi điện thoại chĩa vào "Site thi công" theo vị trí bạn thích.
+3. **Execution AI:** Chạy 3 tiến trình con của Python AI `WorkSafetyPipeline.run()`, mỗi tiến trình gắn 1 input URL của IP Webcam thay cho tham số `0` (Webcam PC).
+4. **Endpoint Muxing:** Bạn mở 3 Cổng MJPEG khác nhau (FastAPI port `5001`, `5002`, `5003`).
+5. **Dashboard (C# WinForms):** Thiết kế Form chứa 3 khung PictureBox Mini (Thay vì chỉ 1 Camera lớn hiện tại). Mỗi khung gọi Stream từ 1 IP Port. Trực quan như hệ thống HIKVision. Khi Đội thử/Tháo thử Mũ, Tiếng Còi/Label Đỏ ở Winform sẽ nhảy lên tại đúng ô Camera Tương ứng!

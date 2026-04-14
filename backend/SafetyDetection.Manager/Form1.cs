@@ -98,100 +98,87 @@ namespace SafetyDetection.Manager
             }
         }
 
+        private string PythonApiUrl = "http://localhost:5000";
+
         private void btnSimulate_Click(object sender, EventArgs e)
         {
             _isSimulating = !_isSimulating;
             if (_isSimulating)
             {
+                simTimer.Interval = 50; // Pull 5 FPS
                 simTimer.Start();
-                btnSimulate.Text = "Stop Simulation";
+                btnSimulate.Text = "Disconnect Live Feed";
                 btnSimulate.BackColor = Color.Gray;
-                AppendLog("Simulation Started. Waiting for live streams...\n");
+                AppendLog("Connecting to Python Live Stream at " + PythonApiUrl + "...\n");
             }
             else
             {
                 simTimer.Stop();
-                btnSimulate.Text = "Start Simulation";
+                btnSimulate.Text = "Connect to Live Feed";
                 btnSimulate.BackColor = Color.FromArgb(192, 57, 43);
-                AppendLog("Simulation Stopped.\n");
+                AppendLog("Connection Closed.\n");
                 _drawBbox = false;
+                if (picCameraPreview.Image != null) picCameraPreview.Image.Dispose();
+                picCameraPreview.Image = null;
                 picCameraPreview.Invalidate();
             }
         }
 
-        private void SimTimer_Tick(object sender, EventArgs e)
+        private async void SimTimer_Tick(object sender, EventArgs e)
         {
-            if (_context.Sites.Local.Count == 0) return; // Wait for data sync if none exists
-
-            var severity = _random.Next(1, 4);
-            var severityText = severity == 3 ? "CRITICAL" : (severity == 2 ? "HIGH" : "MEDIUM");
-            var ruleCode = _random.Next(0, 2) == 0 ? "NO_HELMET" : "UNAUTHORIZED_ACCESS";
-
-            // Find Real objects for UI rendering
-            var mockSite = _context.Sites.FirstOrDefault();
-            var mockSiteId = mockSite?.Id ?? Guid.NewGuid();
-            var siteName = mockSite?.Name ?? "Unknown Site";
-
-            var mockCamera = _context.Cameras.FirstOrDefault(c => c.SiteId == mockSiteId) ?? _context.Cameras.FirstOrDefault();
-            var mockCameraId = mockCamera?.Id ?? Guid.NewGuid();
-            var camName = mockCamera?.Name ?? "Unknown Camera";
-
-            var mockCriterion = _context.SafetyCriteria.FirstOrDefault(c => c.Code == ruleCode) ?? _context.SafetyCriteria.FirstOrDefault();
-            var mockCriterionId = mockCriterion?.Id ?? Guid.NewGuid();
-            var critName = mockCriterion?.Name ?? ruleCode;
-
-            var violationId = Guid.NewGuid();
-
-            // Update Logs
-            var logStr = $"[{DateTime.Now:HH:mm:ss}] ⚠️ NEW ALERT!\n" +
-                         $"   Violation : {critName} ({ruleCode})\n" +
-                         $"   Severity  : {severityText}\n" +
-                         $"   Location  : {siteName} - {camName}\n" +
-                         $"   Track ID  : person_{_random.Next(1000, 9999)}\n" +
-                         $"----------------------------------------";
-            AppendLog(logStr);
-
-            // Update Analytics Labels
-            _totalAlerts++;
-            if (severity == 3) _totalCritical++;
-            lblTotalAlerts.Text = $"Total Alerts Today: {_totalAlerts}";
-            lblTotalCritical.Text = $"Critical Severity: {_totalCritical}";
-
-            // Trigger Camera Preview Bounding Box Animation
-            _drawBbox = true;
-            _currentBboxLabel = $"{ruleCode} ({Math.Round(_random.NextDouble() * 0.4 + 0.5, 2)*100}%)";
-            _currentBbox = new Rectangle(
-                _random.Next(20, picCameraPreview.Width - 100), 
-                _random.Next(20, picCameraPreview.Height - 100), 
-                _random.Next(50, 100), 
-                _random.Next(50, 150)
-            );
-            picCameraPreview.Invalidate();
-
-            // Persist to database
-            var v = new Violation
-            {
-                Id = violationId,
-                SiteId = mockSiteId,
-                CameraId = mockCameraId,
-                CriterionId = mockCriterionId,
-                TrackId = $"person_{_random.Next(1000, 9999)}",
-                Severity = severity,
-                StartedAt = DateTime.UtcNow,
-                ConfirmedAt = DateTime.UtcNow,
-                Status = "open",
-                VoteTotalFrames = 30,
-                VoteViolationFrames = 25,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            
+             // 1. Fetch Latest Frame from Python API
             try
             {
-                _context.Violations.Add(v);
-                _context.SaveChanges();
+                var request = System.Net.WebRequest.Create($"{PythonApiUrl}/latest_frame");
+                request.Timeout = 1000;
+                using var response = await request.GetResponseAsync();
+                using var stream = response.GetResponseStream();
+                if (stream != null)
+                {
+                    var img = Image.FromStream(stream);
+                    var oldImage = picCameraPreview.Image;
+                    picCameraPreview.Image = img;
+                    oldImage?.Dispose();
+                }
+            }
+            catch { /* Frame API not running */ }
+
+            // 2. Fetch Latest Violations from Shared DB (created by SafetyDetection.Api / Python)
+            if (_context.Sites.Local.Count == 0) return;
+
+            try
+            {
+                var latestViolations = _context.Violations.AsNoTracking()
+                    .OrderByDescending(v => v.CreatedAt)
+                    .Take(5)
+                    .ToList();
+                    
+                foreach (var vio in latestViolations)
+                {
+                    // Check if we already logged this to avoid duplicate prints
+                    if (!_context.Violations.Local.Any(x => x.Id == vio.Id))
+                    {
+                        var critName = _context.SafetyCriteria.FirstOrDefault(c => c.Id == vio.CriterionId)?.Name ?? "NO_HELMET";
+                        var severityText = vio.Severity == 3 ? "CRITICAL" : "HIGH";
+                        
+                        var logStr = $"[{vio.CreatedAt.ToLocalTime():HH:mm:ss}] ⚠️ NEW ALERT!\n" +
+                                     $"   Violation : {critName}\n" +
+                                     $"   Severity  : {severityText}\n" +
+                                     $"   Track ID  : {vio.TrackId}\n" +
+                                     $"----------------------------------------";
+                        AppendLog(logStr);
+                        
+                        _totalAlerts++;
+                        if (vio.Severity == 3) _totalCritical++;
+                        lblTotalAlerts.Text = $"Total Alerts Today: {_totalAlerts}";
+                        lblTotalCritical.Text = $"Critical Severity: {_totalCritical}";
+                        
+                        // Attach to local tracker
+                        _context.Violations.Attach(vio);
+                    }
+                }
             } 
-            catch { /* Ignore minor FK glitches during fast polling */ }
+            catch { /* Ignore minor DB timeout/glitches during polling */ }
         }
 
         private void picCameraPreview_Paint(object sender, PaintEventArgs e)
@@ -206,28 +193,10 @@ namespace SafetyDetection.Manager
             for (int i = 0; i < picCameraPreview.Height; i += 40)
                 g.DrawLine(gridPen, 0, i, picCameraPreview.Width, i);
 
-            if (_drawBbox)
-            {
-                // Draw AI Bounding Box
-                Pen boxPen = new Pen(Color.Red, 3);
-                g.DrawRectangle(boxPen, _currentBbox);
-                
-                // Draw Label Box
-                Font font = new Font("Segoe UI", 9, FontStyle.Bold);
-                SizeF textSize = g.MeasureString(_currentBboxLabel, font);
-                RectangleF textRect = new RectangleF(_currentBbox.X, _currentBbox.Y - 20, textSize.Width, 20);
-                
-                g.FillRectangle(Brushes.Red, textRect);
-                g.DrawString(_currentBboxLabel, font, Brushes.White, _currentBbox.X, _currentBbox.Y - 20);
-                
-                // Overlay REC icon
-                g.FillEllipse(Brushes.Red, picCameraPreview.Width - 30, 10, 15, 15);
-                g.DrawString("REC", font, Brushes.White, picCameraPreview.Width - 65, 10);
-            }
-            else
+            if (picCameraPreview.Image == null)
             {
                 Font font = new Font("Segoe UI", 12, FontStyle.Italic);
-                g.DrawString("NO SIGNAL / WAITING...", font, Brushes.Gray, 10, 10);
+                g.DrawString("NO SIGNAL / WAITING FOR PYTHON STREAM...", font, Brushes.Gray, 10, 10);
             }
         }
 
