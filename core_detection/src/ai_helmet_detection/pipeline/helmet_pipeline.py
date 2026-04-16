@@ -68,6 +68,10 @@ class WorkerSafetyPipeline:
 
         #connect with video stream (take FPS and sourcr time)
         capture = cv2.VideoCapture(normalized_source)
+        
+        # Optimize OpenCV Buffer: Drop stale frames to fix accumulated camera lag
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         if not capture.isOpened():
             raise ValueError(f"Unable to open source: {source}")
 
