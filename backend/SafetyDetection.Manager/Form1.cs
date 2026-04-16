@@ -105,7 +105,7 @@ namespace SafetyDetection.Manager
             _isSimulating = !_isSimulating;
             if (_isSimulating)
             {
-                simTimer.Interval = 50; // Pull 5 FPS
+                simTimer.Interval = 50; 
                 simTimer.Start();
                 btnSimulate.Text = "Disconnect Live Feed";
                 btnSimulate.BackColor = Color.Gray;

@@ -68,6 +68,10 @@ class WorkerSafetyPipeline:
 
         #connect with video stream (take FPS and sourcr time)
         capture = cv2.VideoCapture(normalized_source)
+        
+        # Optimize OpenCV Buffer: Drop stale frames to fix accumulated camera lag
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         if not capture.isOpened():
             raise ValueError(f"Unable to open source: {source}")
 
@@ -183,6 +187,167 @@ class WorkerSafetyPipeline:
                 if max_frames and frame_index >= max_frames:
                     break
         finally:
+            capture.release()
+
+    def async_run(
+        self,
+        source: FrameSource,
+        max_frames: int = 0,
+    ) -> Iterator[PipelineFrame]:
+        """
+        Asynchronous Pipeline Runner: Luồng Camera và Luồng AI được xé ra chạy song song.
+        Giúp video xuất ra ở 30 FPS siêu mượt (bằng đúng FPS của camera), 
+        còn Bounding Box AI sẽ tự động di chuyển đè lên theo tốc độ của phần cứng AI.
+        """
+        import threading
+        import time
+
+        normalized_source = self._normalize_source(source)
+        capture = cv2.VideoCapture(normalized_source)
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if not capture.isOpened():
+            raise ValueError(f"Unable to open source: {source}")
+
+        self._is_running = True
+        self._shared_raw_frame = None
+        self._shared_ai_result = None
+        self._shared_frame_index = 0
+        
+        source_fps = capture.get(cv2.CAP_PROP_FPS)
+        source_fps = source_fps if source_fps > 0 else 30.0
+        source_start_time = datetime.now(timezone.utc)
+
+        # Trạm 1: Công nhân khuân vác hình ảnh (Camera Worker) - Chạy 30 lần/giây
+        def camera_worker():
+            frame_idx = 0
+            while self._is_running:
+                has_frame, frame = capture.read()
+                if not has_frame:
+                    self._is_running = False
+                    break
+                frame = cv2.resize(frame, (640, 480))
+                self._shared_raw_frame = frame
+                frame_idx += 1
+                self._shared_frame_index = frame_idx
+                # Giải phóng CPU một chút (1/60s) để tránh treo luồng Camera IPC
+                time.sleep(0.016)
+
+        # Trạm 2: Kỹ sư ngắm nghía đồ thị (AI Worker) - Năng lực ~5 đến 15 lần/giây tùy máy
+        def ai_worker():
+            previous_frame = None
+            last_violations = []
+            last_official_alerts = []
+            last_tracking_frame = None
+            dropped_count = 0
+            MAX_GRACE_PERIOD = 5
+            
+            while self._is_running:
+                frame = self._shared_raw_frame
+                frame_idx = self._shared_frame_index
+                if frame is None:
+                    time.sleep(0.02)
+                    continue
+
+                current_frame_copy = frame.copy()
+                accepted, processed_frame, preprocessing_metrics = self.preprocessor.process_frame(
+                    current_frame_copy, previous_frame
+                )
+                previous_frame = current_frame_copy
+
+                source_time_seconds = self._resolve_source_time_seconds(capture, frame_idx, source_fps)
+                event_time = source_start_time + timedelta(seconds=source_time_seconds)
+
+                if accepted:
+                    dropped_count = 0
+                    tracking_frame = self.tracker.track_frame(processed_frame, frame_idx)
+                    violations = validate_helmet_violations_from_results(tracking_frame.results)
+                    official_alerts = self.validator.update(
+                        frame_index=frame_idx,
+                        frame=processed_frame,
+                        violations=violations,
+                        event_time=event_time,
+                        source_time_seconds=source_time_seconds,
+                    )
+                    
+                    self._shared_ai_result = {
+                        "accepted": True,
+                        "metrics": preprocessing_metrics,
+                        "tracking": tracking_frame,
+                        "violations": violations,
+                        "alerts": official_alerts,
+                        "drop_reason": None,
+                        "event_time": event_time,
+                        "source_time_seconds": source_time_seconds,
+                    }
+                    last_tracking_frame = tracking_frame
+                    last_violations = violations
+                    last_official_alerts = official_alerts
+                else:
+                    dropped_count += 1
+                    drop_reason = self._resolve_drop_reason(preprocessing_metrics)
+                    
+                    if dropped_count <= MAX_GRACE_PERIOD and last_tracking_frame is not None:
+                        active_violations = last_violations
+                        active_alerts = last_official_alerts
+                        active_tracking = last_tracking_frame
+                    else:
+                        active_violations = []
+                        active_alerts = []
+                        active_tracking = None
+                        
+                    self._shared_ai_result = {
+                        "accepted": False,
+                        "metrics": preprocessing_metrics,
+                        "tracking": active_tracking,
+                        "violations": active_violations,
+                        "alerts": active_alerts,
+                        "drop_reason": drop_reason,
+                        "event_time": event_time,
+                        "source_time_seconds": source_time_seconds,
+                    }
+
+        # Kích khởi các đường hầm song song (Daemon Threads)
+        t_cam = threading.Thread(target=camera_worker)
+        t_cam.daemon = True
+        t_cam.start()
+
+        t_ai = threading.Thread(target=ai_worker)
+        t_ai.daemon = True
+        t_ai.start()
+
+        # Generator Channel: Bơm ảnh sạch và mới tinh lên Giao diện cực nhanh
+        try:
+            while self._is_running:
+                frame = self._shared_raw_frame
+                ai_res = self._shared_ai_result
+                
+                if frame is not None and ai_res is not None:
+                    # Lấy frame mới nhất MỚI CHỚP TẮT (30fps) để in lên (thay vì frame cũ rích của AI)
+                    display_frame = self._annotate_frame(
+                        frame.copy(),
+                        accepted=ai_res["accepted"],
+                        preprocessing_metrics=ai_res["metrics"],
+                        violations=ai_res["violations"],
+                        official_alerts=ai_res["alerts"],
+                        drop_reason=ai_res["drop_reason"],
+                    )
+                    yield PipelineFrame(
+                        frame_index=self._shared_frame_index,
+                        event_time=ai_res["event_time"],
+                        source_time_seconds=ai_res["source_time_seconds"],
+                        accepted=ai_res["accepted"],
+                        display_frame=display_frame,
+                        preprocessing_metrics=ai_res["metrics"],
+                        tracking_frame=ai_res["tracking"],
+                        violations=ai_res["violations"],
+                        official_alerts=ai_res["alerts"],
+                        drop_reason=ai_res["drop_reason"],
+                    )
+                # Tốc độ Render cố định ~30 FPS
+                time.sleep(0.033)
+                
+        finally:
+            self._is_running = False
             capture.release()
 
     def _annotate_frame(

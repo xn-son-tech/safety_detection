@@ -256,11 +256,14 @@ def validate_helmet_violations(
 
     violations = []
     for headwear_detection in headwear_detections:
-        x1, y1, x2, y2 = headwear_detection.bounding_box
+        # Trong luồng này (dành cho head/helmet tracking tracker), 
+        # detection box vốn dĩ đã là cái Đầu (hoặc cái mũ). Nên không được lấy 35% (bị thiếu).
+        # Ta giữ nguyên full size để IoU match khớp 1-1 với class Helmet!
+        head_roi = headwear_detection.bounding_box
+        x1, y1, x2, y2 = head_roi
         width  = max(x2 - x1, 1e-6)
         height = max(y2 - y1, 1e-6)
         aspect_ratio = height / width
-        head_roi = (x1, y1, x2, y1 + (height * head_roi_ratio))
 
         best_iou = 0.0
         matched_helmet_box = None
@@ -373,18 +376,32 @@ def evaluate_tracked_person_violations(
     head_roi_matrix = np.array(head_rois, dtype=np.float32) if head_rois else np.empty((0, 4), dtype=np.float32)
 
     if len(head_roi_matrix) and len(helmet_boxes):
-        iou_matrix = calculate_iou_matrix(head_roi_matrix, helmet_boxes)
+        iou_matrix, ioa_matrix = calculate_both_iou_ioa_matrix(head_roi_matrix, helmet_boxes)
         
-        # Edge Case Fix: Occlusion / Hugging
-        # Prevent one helmet from satisfying multiple people's Head ROI.
-        best_person_for_helmet = iou_matrix.argmax(axis=0)
+        # Edge Case Fix: 1-to-1 Greedy Matching for Occlusion / Hugging
+        # Prevent one person from stealing multiple helmets, and prevent 1 helmet 
+        # from satisfying multiple people. 
+        # Sort all pairs by IoU score (best matches first)
+        flat_indices = np.argsort(iou_matrix, axis=None)[::-1]
+        
+        claimed_helmets = set()
+        claimed_persons = set()
         mask = np.zeros_like(iou_matrix, dtype=bool)
-        for h_idx, p_idx in enumerate(best_person_for_helmet):
-            if iou_matrix[p_idx, h_idx] > 0:
-                mask[p_idx, h_idx] = True
-        iou_matrix = np.where(mask, iou_matrix, 0.0)
         
-        best_overlaps = iou_matrix.max(axis=1).tolist()
+        for flat_idx in flat_indices:
+            p_idx, h_idx = divmod(int(flat_idx), iou_matrix.shape[1])
+            if iou_matrix[p_idx, h_idx] <= 0:
+                break # Reached pairs with zero overlap
+                
+            if p_idx not in claimed_persons and h_idx not in claimed_helmets:
+                mask[p_idx, h_idx] = True
+                claimed_helmets.add(h_idx)
+                claimed_persons.add(p_idx)
+                
+        # For the accepted matches, use the IoA (Intersection over Helmet Area) as the final overlap score.
+        # This fixes the issue where a wide person bounding box brutally drops the IoU score.
+        ioa_matrix = np.where(mask, ioa_matrix, 0.0)
+        best_overlaps = ioa_matrix.max(axis=1).tolist()
     else:
         best_overlaps = [0.0] * len(persons)
 
@@ -392,6 +409,7 @@ def evaluate_tracked_person_violations(
 
     validation_results: list[PersonValidationResult] = []
     for person, head_roi, best_overlap in zip(persons, head_rois, best_overlaps):
+        # best_overlap is now an Intersection-over-Area score (how much of the helmet is inside the ROI)
         would_violate = best_overlap < min_head_iou
 
         # ------------------------------------------------------------------
@@ -458,17 +476,11 @@ def build_head_roi(
     right = max(x1, x2)
 
     height = max(bottom - top, 1)
-    width = max(right - left, 1)
     
-    # Edge Case Fix: Dynamic Head ROI based on Aspect Ratio (Squat/Bend pose and Partial View)
-    aspect_ratio = height / width
-    dynamic_ratio = head_roi_ratio
-    
-    if aspect_ratio < 1.5:  
-        # Person is wide (bending/squatting) or only partial torso is seen
-        dynamic_ratio = head_roi_ratio * 0.7  # Shrink ROI to avoid stomach/hands
-        
-    roi_bottom = top + max(int(height * dynamic_ratio), 1)
+    # Bỏ việc ép tỷ lệ aspect ratio (co hẹp Head ROI khi chiều ngang lớn).
+    # Vì khi một người dang tay (bounding box rộng) hoặc đang ngồi xổm (bounding box thấp bé), 
+    # cái đầu vẫn sẽ nằm ở vị trí trên cùng và chiếm khoảng tỷ lệ head_roi_ratio (ví dụ 35%) của cơ thể. 
+    roi_bottom = top + max(int(height * head_roi_ratio), 1)
     return (left, top, right, min(roi_bottom, bottom))
 
 
@@ -485,12 +497,12 @@ def calculate_overlap_ratio(
     )
 
 
-def calculate_iou_matrix(
+def calculate_both_iou_ioa_matrix(
     boxes_a: np.ndarray,
     boxes_b: np.ndarray,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     if boxes_a.size == 0 or boxes_b.size == 0:
-        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
+        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32), np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
 
     a_x1 = boxes_a[:, 0][:, None]
     a_y1 = boxes_a[:, 1][:, None]
@@ -515,7 +527,17 @@ def calculate_iou_matrix(
     area_b = np.maximum(b_x2 - b_x1, 0.0) * np.maximum(b_y2 - b_y1, 0.0)
     union = area_a + area_b - intersection
 
-    return np.where(union > 0.0, intersection / union, 0.0).astype(np.float32)
+    iou_matrix = np.where(union > 0.0, intersection / union, 0.0).astype(np.float32)
+    ioa_matrix = np.where(area_b > 0.0, intersection / area_b, 0.0).astype(np.float32)
+    
+    return iou_matrix, ioa_matrix
+
+def calculate_iou_matrix(
+    boxes_a: np.ndarray,
+    boxes_b: np.ndarray,
+) -> np.ndarray:
+    iou_matrix, _ = calculate_both_iou_ioa_matrix(boxes_a, boxes_b)
+    return iou_matrix
 
 
 def _calculate_iou(
