@@ -9,6 +9,7 @@ from flask import Flask, Response
 
 from ai_helmet_detection.pipeline import WorkerSafetyPipeline, HelmetSystem
 from ai_helmet_detection.tracking import YoloWorkerTracker
+from ai_helmet_detection.alert_validation import ViolationValidator
 
 app = Flask(__name__)
 
@@ -17,15 +18,26 @@ current_frame = None
 
 def generate_frames():
     global current_frame
+    last_processed_frame = None
+    last_frame_bytes = None
+    
     while True:
+        # Prevent 100% CPU lock by enforcing max 30 FPS loop rate
+        time.sleep(0.033) 
+        
         if current_frame is not None:
-            ret, buffer = cv2.imencode('.jpg', current_frame)
-            if ret:
-                frame_bytes = buffer.tobytes()
+            # Only encode (heavy operation) if the frame actually changed
+            if current_frame is not last_processed_frame:
+                last_processed_frame = current_frame
+                # Compress quality to 60 for low latency local stream
+                ret, buffer = cv2.imencode('.jpg', current_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                if ret:
+                    last_frame_bytes = buffer.tobytes()
+            
+            # Continuously push bytes to keep MJPEG socket alive
+            if last_frame_bytes is not None:
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        else:
-            time.sleep(0.05)
+                       b'Content-Type: image/jpeg\r\n\r\n' + last_frame_bytes + b'\r\n')
 
 @app.route('/stream')
 def video_feed():
@@ -42,15 +54,21 @@ def get_latest_frame():
 
 def run_pipeline(source_url: str, backend_api_url: str, site_id: str, camera_id: str):
     global current_frame
-    # Use HelmetSystem or configure tracker. Let's setup the default tracker.
-    tracker = YoloWorkerTracker(model_path="helmet_v2_final.pt") # Assumes models are in CWD
-    pipeline = WorkerSafetyPipeline(tracker=tracker)
+    # Assumes models are in CWD
+    tracker = YoloWorkerTracker(model_path="helmet_v2_final.pt")
     
-    print(f"[*] Starting Pipeline on source: {source_url}")
-    print(f"[*] MJPEG streaming on /stream")
+    # Custom Validator: Khớp nhịp vụ Async AI
+    # Đưa window_size về 1 (Tức là chỉ cần 1 khung hình xuất hiện vi phạm là Bắt ngay lập tức)
+    # Khắc phục triệt để tình trạng người chuyển động làm đứt chuỗi Track_ID.
+    validator = ViolationValidator(window_size=1, alert_threshold=0.0, cooldown_seconds=2.0)
+    
+    pipeline = WorkerSafetyPipeline(tracker=tracker, validator=validator)
+    
+    print(f"[*] Starting ASYNC Pipeline on source: {source_url}")
+    print(f"[*] MJPEG streaming on /stream (V2 - 30 FPS Smooth)")
     print(f"[*] Outbound backend API: {backend_api_url}")
     
-    for frame_data in pipeline.run(source_url):
+    for frame_data in pipeline.async_run(source_url):
         current_frame = frame_data.display_frame
         
         # Oubound REST API Integration for sending alerts
