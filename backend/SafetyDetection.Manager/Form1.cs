@@ -1,6 +1,8 @@
 using System;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using System.Windows.Forms;
 using Microsoft.EntityFrameworkCore;
 using SafetyDetection.Shared.Data;
@@ -13,7 +15,7 @@ namespace SafetyDetection.Manager
         private SafetyDbContext _context;
         private bool _isSimulating = false;
         private Random _random = new Random();
-        
+
         private int _totalAlerts = 0;
         private int _totalCritical = 0;
 
@@ -100,20 +102,29 @@ namespace SafetyDetection.Manager
 
         private string PythonApiUrl = "http://localhost:5000";
 
+        private System.Threading.CancellationTokenSource _streamCts;
+
         private void btnSimulate_Click(object sender, EventArgs e)
         {
             _isSimulating = !_isSimulating;
             if (_isSimulating)
             {
-                simTimer.Interval = 50; 
-                simTimer.Start();
                 btnSimulate.Text = "Disconnect Live Feed";
                 btnSimulate.BackColor = Color.Gray;
-                AppendLog("Connecting to Python Live Stream at " + PythonApiUrl + "...\n");
+                AppendLog("Connecting to Python Live Stream (MJPEG via TCP) at " + PythonApiUrl + "...\n");
+                
+                _streamCts = new System.Threading.CancellationTokenSource();
+                _ = StartMjpegStreamAsync(_streamCts.Token);
+                _ = PollDatabaseAsync(_streamCts.Token);
             }
             else
             {
-                simTimer.Stop();
+                if (_streamCts != null)
+                {
+                    _streamCts.Cancel();
+                    _streamCts.Dispose();
+                    _streamCts = null;
+                }
                 btnSimulate.Text = "Connect to Live Feed";
                 btnSimulate.BackColor = Color.FromArgb(192, 57, 43);
                 AppendLog("Connection Closed.\n");
@@ -124,61 +135,122 @@ namespace SafetyDetection.Manager
             }
         }
 
-        private async void SimTimer_Tick(object sender, EventArgs e)
+        private async Task StartMjpegStreamAsync(System.Threading.CancellationToken token)
         {
-             // 1. Fetch Latest Frame from Python API
-            try
+            using var client = new System.Net.Http.HttpClient();
+            client.Timeout = TimeSpan.FromMilliseconds(System.Threading.Timeout.Infinite);
+            
+            try 
             {
-                var request = System.Net.WebRequest.Create($"{PythonApiUrl}/latest_frame");
-                request.Timeout = 1000;
-                using var response = await request.GetResponseAsync();
-                using var stream = response.GetResponseStream();
-                if (stream != null)
+                using var response = await client.GetAsync($"{PythonApiUrl}/stream", System.Net.Http.HttpCompletionOption.ResponseHeadersRead, token);
+                response.EnsureSuccessStatusCode();
+                using var stream = await response.Content.ReadAsStreamAsync(token);
+                
+                var buffer = new byte[81920]; 
+                var imgBuffer = new List<byte>(1024 * 1024); 
+                
+                while (!token.IsCancellationRequested)
                 {
-                    var img = Image.FromStream(stream);
-                    var oldImage = picCameraPreview.Image;
-                    picCameraPreview.Image = img;
-                    oldImage?.Dispose();
+                    int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token);
+                    if (bytesRead == 0) break;
+                    
+                    imgBuffer.AddRange(buffer.Take(bytesRead));
+                    
+                    int startIdx = FindBoundary(imgBuffer, new byte[] { 0xFF, 0xD8 });
+                    if (startIdx >= 0)
+                    {
+                        int endIdx = FindBoundary(imgBuffer, new byte[] { 0xFF, 0xD9 }, startIdx);
+                        if (endIdx > startIdx)
+                        {
+                            endIdx += 2; 
+                            var imgData = imgBuffer.Skip(startIdx).Take(endIdx - startIdx).ToArray();
+                            imgBuffer.RemoveRange(0, endIdx);
+                            
+                            try
+                            {
+                                using var ms = new System.IO.MemoryStream(imgData);
+                                var img = Image.FromStream(ms);
+                                
+                                this.Invoke((MethodInvoker)delegate {
+                                    var oldImage = picCameraPreview.Image;
+                                    picCameraPreview.Image = img;
+                                    oldImage?.Dispose();
+                                });
+                            }
+                            catch { }
+                        }
+                    }
+                    if (imgBuffer.Count > 5 * 1024 * 1024) imgBuffer.Clear();
                 }
             }
-            catch { /* Frame API not running */ }
+            catch { }
+        }
 
-            // 2. Fetch Latest Violations from Shared DB (created by SafetyDetection.Api / Python)
-            if (_context.Sites.Local.Count == 0) return;
-
-            try
+        private int FindBoundary(List<byte> buffer, byte[] marker, int startIndex = 0)
+        {
+            for (int i = startIndex; i <= buffer.Count - marker.Length; i++)
             {
-                var latestViolations = _context.Violations.AsNoTracking()
-                    .OrderByDescending(v => v.CreatedAt)
-                    .Take(5)
-                    .ToList();
-                    
-                foreach (var vio in latestViolations)
+                bool match = true;
+                for (int j = 0; j < marker.Length; j++)
                 {
-                    // Check if we already logged this to avoid duplicate prints
-                    if (!_context.Violations.Local.Any(x => x.Id == vio.Id))
+                    if (buffer[i + j] != marker[j])
                     {
-                        var critName = _context.SafetyCriteria.FirstOrDefault(c => c.Id == vio.CriterionId)?.Name ?? "NO_HELMET";
-                        var severityText = vio.Severity == 3 ? "CRITICAL" : "HIGH";
-                        
-                        var logStr = $"[{vio.CreatedAt.ToLocalTime():HH:mm:ss}] ⚠️ NEW ALERT!\n" +
-                                     $"   Violation : {critName}\n" +
-                                     $"   Severity  : {severityText}\n" +
-                                     $"   Track ID  : {vio.TrackId}\n" +
-                                     $"----------------------------------------";
-                        AppendLog(logStr);
-                        
-                        _totalAlerts++;
-                        if (vio.Severity == 3) _totalCritical++;
-                        lblTotalAlerts.Text = $"Total Alerts Today: {_totalAlerts}";
-                        lblTotalCritical.Text = $"Critical Severity: {_totalCritical}";
-                        
-                        // Attach to local tracker
-                        _context.Violations.Attach(vio);
+                        match = false;
+                        break;
                     }
                 }
-            } 
-            catch { /* Ignore minor DB timeout/glitches during polling */ }
+                if (match) return i;
+            }
+            return -1;
+        }
+
+        private async Task PollDatabaseAsync(System.Threading.CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                if (_context.Sites.Local.Count > 0)
+                {
+                    try
+                    {
+                        var latestViolations = _context.Violations.AsNoTracking()
+                            .OrderByDescending(v => v.CreatedAt)
+                            .Take(5)
+                            .ToList();
+
+                        foreach (var vio in latestViolations)
+                        {
+                            if (!_context.Violations.Local.Any(x => x.Id == vio.Id))
+                            {
+                                var critName = _context.SafetyCriteria.FirstOrDefault(c => c.Id == vio.CriterionId)?.Name ?? "NO_HELMET";
+                                var severityText = vio.Severity == 3 ? "CRITICAL" : "HIGH";
+
+                                var logStr = $"[{vio.CreatedAt.ToLocalTime():HH:mm:ss}] ⚠️ NEW ALERT!\n" +
+                                             $"   Violation : {critName}\n" +
+                                             $"   Severity  : {severityText}\n" +
+                                             $"   Track ID  : {vio.TrackId}\n" +
+                                             $"----------------------------------------";
+                                this.Invoke((MethodInvoker)delegate {
+                                    AppendLog(logStr);
+                                    _totalAlerts++;
+                                    if (vio.Severity == 3) _totalCritical++;
+                                    lblTotalAlerts.Text = $"Total Alerts Today: {_totalAlerts}";
+                                    lblTotalCritical.Text = $"Critical Severity: {_totalCritical}";
+                                });
+
+                                _context.Violations.Attach(vio);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                
+                await Task.Delay(500, token); // Optimised: DB checked only 2 times a second
+            }
+        }
+
+        private void SimTimer_Tick(object sender, EventArgs e)
+        {
+            // Deprecated: Loop functionality moved to StartMjpegStreamAsync & PollDatabaseAsync
         }
 
         private void picCameraPreview_Paint(object sender, PaintEventArgs e)
@@ -204,6 +276,11 @@ namespace SafetyDetection.Manager
         {
             rtbLiveFeed.AppendText(message + "\n");
             rtbLiveFeed.ScrollToCaret();
+        }
+
+        private void rtbLiveFeed_TextChanged(object sender, EventArgs e)
+        {
+
         }
     }
 }

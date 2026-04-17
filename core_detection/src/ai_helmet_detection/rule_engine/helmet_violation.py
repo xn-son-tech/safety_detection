@@ -248,9 +248,10 @@ def validate_helmet_violations(
     head_roi_ratio=HEAD_ROI_RATIO,
     min_helmet_iou=0.5,
 ):
+    # Sửa lỗi chí mạng: YOLO trả về 'no helmet' (khoảng trắng) chứ không phải 'no_helmet' (dấu gạch dưới)
     headwear_detections = [
         d for d in detections
-        if d.class_name in {"helmet", "other_hat", "no_helmet"}
+        if d.class_name in {"helmet", "other hat", "no helmet", "other_hat", "no_helmet"}
     ]
     helmet_detections = [d for d in headwear_detections if d.class_name == 'helmet']
 

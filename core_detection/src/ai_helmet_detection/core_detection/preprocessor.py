@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 
 import cv2
 import numpy as np
-from skimage.metrics import structural_similarity
 
 
 @dataclass(frozen=True)
@@ -180,7 +179,7 @@ class Preprocessor:
 		if current_gray.shape != prev_gray.shape:
 			return True, 0.0
 
-		# Downsample before SSIM to avoid allocating large intermediate buffers on
+		# Downsample before MSE to avoid allocating large intermediate buffers on
 		# full-resolution webcam frames. cv2.resize expects (width, height).
 		current_small = cv2.resize(
 			current_gray,
@@ -193,19 +192,20 @@ class Preprocessor:
 			interpolation=cv2.INTER_AREA,
 		)
 
-		score = float(
-			structural_similarity(
-				current_small,
-				prev_small,
-				data_range=255,
-				win_size=self.ssim_win_size,
-			)
-		)
+		# OpenCV Mean Squared Error (MSE) runs natively in C
+		diff = cv2.subtract(current_small, prev_small)
+		err = np.sum(diff.astype(np.float32)**2) / float(current_small.shape[0] * current_small.shape[1])
+		
+		# Set an MSE threshold equivalent to old SSIM tearing detection
+		mse_threshold = 2000.0 if self.ssim_threshold < 0.5 else 1000.0
+
+		# Convert error to a similarity-like score (0 to 1) for backwards compatibility
+		score = 1.0 / (1.0 + err / 1000.0)
 
 		# Release temporary arrays promptly to reduce memory pressure in long runs.
 		del current_small
 		del prev_small
-		return score < float(threshold), score
+		return (err > mse_threshold), score
 
 	def process(self, frame: np.ndarray, prev_frame: Optional[np.ndarray]) -> PreprocessOutput:
 		self._frame_index += 1

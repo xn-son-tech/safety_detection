@@ -22,6 +22,7 @@ namespace SafetyDetection.Manager
             splitContainerLeft = new SplitContainer();
             tabControlData = new TabControl();
             tabPageSites = new TabPage();
+            picCameraPreview = new PictureBox();
             dataGridViewSites = new DataGridView();
             tabPageZones = new TabPage();
             dataGridViewZones = new DataGridView();
@@ -30,7 +31,6 @@ namespace SafetyDetection.Manager
             tabPageCriteria = new TabPage();
             dataGridViewCriteria = new DataGridView();
             panelAnalytics = new Panel();
-            picCameraPreview = new PictureBox();
             lblTotalCritical = new Label();
             lblTotalAlerts = new Label();
             lblAnalyticsTitle = new Label();
@@ -53,6 +53,7 @@ namespace SafetyDetection.Manager
             splitContainerLeft.SuspendLayout();
             tabControlData.SuspendLayout();
             tabPageSites.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)picCameraPreview).BeginInit();
             ((System.ComponentModel.ISupportInitialize)dataGridViewSites).BeginInit();
             tabPageZones.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)dataGridViewZones).BeginInit();
@@ -61,7 +62,6 @@ namespace SafetyDetection.Manager
             tabPageCriteria.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)dataGridViewCriteria).BeginInit();
             panelAnalytics.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)picCameraPreview).BeginInit();
             panelLeftTop.SuspendLayout();
             panelRightTop.SuspendLayout();
             SuspendLayout();
@@ -70,6 +70,7 @@ namespace SafetyDetection.Manager
             // 
             splitContainer1.Dock = DockStyle.Fill;
             splitContainer1.Location = new Point(0, 0);
+            splitContainer1.Margin = new Padding(3, 2, 3, 2);
             splitContainer1.Name = "splitContainer1";
             // 
             // splitContainer1.Panel1
@@ -81,14 +82,15 @@ namespace SafetyDetection.Manager
             // 
             splitContainer1.Panel2.Controls.Add(rtbLiveFeed);
             splitContainer1.Panel2.Controls.Add(panelRightTop);
-            splitContainer1.Size = new Size(1300, 800);
-            splitContainer1.SplitterDistance = 750;
+            splitContainer1.Size = new Size(1138, 600);
+            splitContainer1.SplitterDistance = 656;
             splitContainer1.TabIndex = 0;
             // 
             // splitContainerLeft
             // 
             splitContainerLeft.Dock = DockStyle.Fill;
-            splitContainerLeft.Location = new Point(0, 60);
+            splitContainerLeft.Location = new Point(0, 45);
+            splitContainerLeft.Margin = new Padding(3, 2, 3, 2);
             splitContainerLeft.Name = "splitContainerLeft";
             splitContainerLeft.Orientation = Orientation.Horizontal;
             // 
@@ -99,8 +101,9 @@ namespace SafetyDetection.Manager
             // splitContainerLeft.Panel2
             // 
             splitContainerLeft.Panel2.Controls.Add(panelAnalytics);
-            splitContainerLeft.Size = new Size(750, 740);
-            splitContainerLeft.SplitterDistance = 525;
+            splitContainerLeft.Size = new Size(656, 555);
+            splitContainerLeft.SplitterDistance = 393;
+            splitContainerLeft.SplitterWidth = 3;
             splitContainerLeft.TabIndex = 0;
             // 
             // tabControlData
@@ -111,22 +114,37 @@ namespace SafetyDetection.Manager
             tabControlData.Controls.Add(tabPageCriteria);
             tabControlData.Dock = DockStyle.Fill;
             tabControlData.Location = new Point(0, 0);
+            tabControlData.Margin = new Padding(3, 2, 3, 2);
             tabControlData.Name = "tabControlData";
             tabControlData.SelectedIndex = 0;
-            tabControlData.Size = new Size(750, 525);
+            tabControlData.Size = new Size(656, 393);
             tabControlData.TabIndex = 0;
             // 
             // tabPageSites
             // 
             tabPageSites.Controls.Add(picCameraPreview);
             tabPageSites.Controls.Add(dataGridViewSites);
-            tabPageSites.Location = new Point(4, 29);
+            tabPageSites.Location = new Point(4, 24);
+            tabPageSites.Margin = new Padding(3, 2, 3, 2);
             tabPageSites.Name = "tabPageSites";
-            tabPageSites.Padding = new Padding(3);
-            tabPageSites.Size = new Size(742, 492);
+            tabPageSites.Padding = new Padding(3, 2, 3, 2);
+            tabPageSites.Size = new Size(648, 365);
             tabPageSites.TabIndex = 0;
             tabPageSites.Text = "🌍 Sites";
             tabPageSites.UseVisualStyleBackColor = true;
+            // 
+            // picCameraPreview
+            // 
+            picCameraPreview.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            picCameraPreview.BackColor = Color.Black;
+            picCameraPreview.Location = new Point(24, 178);
+            picCameraPreview.Margin = new Padding(3, 2, 3, 2);
+            picCameraPreview.Name = "picCameraPreview";
+            picCameraPreview.Size = new Size(584, 181);
+            picCameraPreview.SizeMode = PictureBoxSizeMode.StretchImage;
+            picCameraPreview.TabIndex = 0;
+            picCameraPreview.TabStop = false;
+            picCameraPreview.Paint += picCameraPreview_Paint;
             // 
             // dataGridViewSites
             // 
@@ -135,19 +153,21 @@ namespace SafetyDetection.Manager
             dataGridViewSites.BorderStyle = BorderStyle.None;
             dataGridViewSites.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             dataGridViewSites.Dock = DockStyle.Fill;
-            dataGridViewSites.Location = new Point(3, 3);
+            dataGridViewSites.Location = new Point(3, 2);
+            dataGridViewSites.Margin = new Padding(3, 2, 3, 2);
             dataGridViewSites.Name = "dataGridViewSites";
             dataGridViewSites.RowHeadersWidth = 51;
-            dataGridViewSites.Size = new Size(736, 486);
+            dataGridViewSites.Size = new Size(642, 361);
             dataGridViewSites.TabIndex = 0;
             // 
             // tabPageZones
             // 
             tabPageZones.Controls.Add(dataGridViewZones);
-            tabPageZones.Location = new Point(4, 29);
+            tabPageZones.Location = new Point(4, 24);
+            tabPageZones.Margin = new Padding(3, 2, 3, 2);
             tabPageZones.Name = "tabPageZones";
-            tabPageZones.Padding = new Padding(3);
-            tabPageZones.Size = new Size(192, 67);
+            tabPageZones.Padding = new Padding(3, 2, 3, 2);
+            tabPageZones.Size = new Size(648, 366);
             tabPageZones.TabIndex = 1;
             tabPageZones.Text = "📏 Zones";
             tabPageZones.UseVisualStyleBackColor = true;
@@ -159,19 +179,21 @@ namespace SafetyDetection.Manager
             dataGridViewZones.BorderStyle = BorderStyle.None;
             dataGridViewZones.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             dataGridViewZones.Dock = DockStyle.Fill;
-            dataGridViewZones.Location = new Point(3, 3);
+            dataGridViewZones.Location = new Point(3, 2);
+            dataGridViewZones.Margin = new Padding(3, 2, 3, 2);
             dataGridViewZones.Name = "dataGridViewZones";
             dataGridViewZones.RowHeadersWidth = 51;
-            dataGridViewZones.Size = new Size(186, 61);
+            dataGridViewZones.Size = new Size(642, 362);
             dataGridViewZones.TabIndex = 0;
             // 
             // tabPageCameras
             // 
             tabPageCameras.Controls.Add(dataGridViewCameras);
-            tabPageCameras.Location = new Point(4, 29);
+            tabPageCameras.Location = new Point(4, 24);
+            tabPageCameras.Margin = new Padding(3, 2, 3, 2);
             tabPageCameras.Name = "tabPageCameras";
-            tabPageCameras.Padding = new Padding(3);
-            tabPageCameras.Size = new Size(192, 67);
+            tabPageCameras.Padding = new Padding(3, 2, 3, 2);
+            tabPageCameras.Size = new Size(648, 366);
             tabPageCameras.TabIndex = 2;
             tabPageCameras.Text = "🎥 Cameras";
             tabPageCameras.UseVisualStyleBackColor = true;
@@ -183,19 +205,21 @@ namespace SafetyDetection.Manager
             dataGridViewCameras.BorderStyle = BorderStyle.None;
             dataGridViewCameras.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             dataGridViewCameras.Dock = DockStyle.Fill;
-            dataGridViewCameras.Location = new Point(3, 3);
+            dataGridViewCameras.Location = new Point(3, 2);
+            dataGridViewCameras.Margin = new Padding(3, 2, 3, 2);
             dataGridViewCameras.Name = "dataGridViewCameras";
             dataGridViewCameras.RowHeadersWidth = 51;
-            dataGridViewCameras.Size = new Size(186, 61);
+            dataGridViewCameras.Size = new Size(642, 362);
             dataGridViewCameras.TabIndex = 0;
             // 
             // tabPageCriteria
             // 
             tabPageCriteria.Controls.Add(dataGridViewCriteria);
-            tabPageCriteria.Location = new Point(4, 29);
+            tabPageCriteria.Location = new Point(4, 24);
+            tabPageCriteria.Margin = new Padding(3, 2, 3, 2);
             tabPageCriteria.Name = "tabPageCriteria";
-            tabPageCriteria.Padding = new Padding(3);
-            tabPageCriteria.Size = new Size(192, 67);
+            tabPageCriteria.Padding = new Padding(3, 2, 3, 2);
+            tabPageCriteria.Size = new Size(648, 366);
             tabPageCriteria.TabIndex = 3;
             tabPageCriteria.Text = "⚠️ Criteria";
             tabPageCriteria.UseVisualStyleBackColor = true;
@@ -207,10 +231,11 @@ namespace SafetyDetection.Manager
             dataGridViewCriteria.BorderStyle = BorderStyle.None;
             dataGridViewCriteria.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             dataGridViewCriteria.Dock = DockStyle.Fill;
-            dataGridViewCriteria.Location = new Point(3, 3);
+            dataGridViewCriteria.Location = new Point(3, 2);
+            dataGridViewCriteria.Margin = new Padding(3, 2, 3, 2);
             dataGridViewCriteria.Name = "dataGridViewCriteria";
             dataGridViewCriteria.RowHeadersWidth = 51;
-            dataGridViewCriteria.Size = new Size(186, 61);
+            dataGridViewCriteria.Size = new Size(642, 362);
             dataGridViewCriteria.TabIndex = 0;
             // 
             // panelAnalytics
@@ -221,30 +246,19 @@ namespace SafetyDetection.Manager
             panelAnalytics.Controls.Add(lblAnalyticsTitle);
             panelAnalytics.Dock = DockStyle.Fill;
             panelAnalytics.Location = new Point(0, 0);
+            panelAnalytics.Margin = new Padding(3, 2, 3, 2);
             panelAnalytics.Name = "panelAnalytics";
-            panelAnalytics.Size = new Size(750, 211);
+            panelAnalytics.Size = new Size(656, 159);
             panelAnalytics.TabIndex = 0;
-            // 
-            // picCameraPreview
-            // 
-            picCameraPreview.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            picCameraPreview.BackColor = Color.Black;
-            picCameraPreview.Location = new Point(27, 237);
-            picCameraPreview.Name = "picCameraPreview";
-            picCameraPreview.Size = new Size(668, 237);
-            picCameraPreview.SizeMode = PictureBoxSizeMode.StretchImage;
-            picCameraPreview.TabIndex = 0;
-            picCameraPreview.TabStop = false;
-            picCameraPreview.Paint += picCameraPreview_Paint;
             // 
             // lblTotalCritical
             // 
             lblTotalCritical.AutoSize = true;
             lblTotalCritical.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             lblTotalCritical.ForeColor = Color.FromArgb(192, 57, 43);
-            lblTotalCritical.Location = new Point(12, 120);
+            lblTotalCritical.Location = new Point(10, 90);
             lblTotalCritical.Name = "lblTotalCritical";
-            lblTotalCritical.Size = new Size(185, 28);
+            lblTotalCritical.Size = new Size(147, 21);
             lblTotalCritical.TabIndex = 1;
             lblTotalCritical.Text = "Critical Severity: 0";
             // 
@@ -253,9 +267,9 @@ namespace SafetyDetection.Manager
             lblTotalAlerts.AutoSize = true;
             lblTotalAlerts.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             lblTotalAlerts.ForeColor = Color.FromArgb(41, 128, 185);
-            lblTotalAlerts.Location = new Point(12, 80);
+            lblTotalAlerts.Location = new Point(10, 60);
             lblTotalAlerts.Name = "lblTotalAlerts";
-            lblTotalAlerts.Size = new Size(207, 28);
+            lblTotalAlerts.Size = new Size(163, 21);
             lblTotalAlerts.TabIndex = 2;
             lblTotalAlerts.Text = "Total Alerts Today: 0";
             // 
@@ -264,9 +278,9 @@ namespace SafetyDetection.Manager
             lblAnalyticsTitle.AutoSize = true;
             lblAnalyticsTitle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
             lblAnalyticsTitle.ForeColor = Color.FromArgb(44, 62, 80);
-            lblAnalyticsTitle.Location = new Point(12, 15);
+            lblAnalyticsTitle.Location = new Point(10, 11);
             lblAnalyticsTitle.Name = "lblAnalyticsTitle";
-            lblAnalyticsTitle.Size = new Size(322, 32);
+            lblAnalyticsTitle.Size = new Size(244, 25);
             lblAnalyticsTitle.TabIndex = 3;
             lblAnalyticsTitle.Text = "📊 AI Analytics Dashboard";
             // 
@@ -278,8 +292,9 @@ namespace SafetyDetection.Manager
             panelLeftTop.Controls.Add(label1);
             panelLeftTop.Dock = DockStyle.Top;
             panelLeftTop.Location = new Point(0, 0);
+            panelLeftTop.Margin = new Padding(3, 2, 3, 2);
             panelLeftTop.Name = "panelLeftTop";
-            panelLeftTop.Size = new Size(750, 60);
+            panelLeftTop.Size = new Size(656, 45);
             panelLeftTop.TabIndex = 1;
             // 
             // btnSave
@@ -287,9 +302,10 @@ namespace SafetyDetection.Manager
             btnSave.BackColor = Color.FromArgb(46, 204, 113);
             btnSave.FlatStyle = FlatStyle.Flat;
             btnSave.ForeColor = Color.White;
-            btnSave.Location = new Point(510, 15);
+            btnSave.Location = new Point(446, 11);
+            btnSave.Margin = new Padding(3, 2, 3, 2);
             btnSave.Name = "btnSave";
-            btnSave.Size = new Size(100, 30);
+            btnSave.Size = new Size(88, 22);
             btnSave.TabIndex = 0;
             btnSave.Text = "Save DB";
             btnSave.UseVisualStyleBackColor = false;
@@ -300,9 +316,10 @@ namespace SafetyDetection.Manager
             btnRefresh.BackColor = Color.FromArgb(52, 152, 219);
             btnRefresh.FlatStyle = FlatStyle.Flat;
             btnRefresh.ForeColor = Color.White;
-            btnRefresh.Location = new Point(400, 15);
+            btnRefresh.Location = new Point(350, 11);
+            btnRefresh.Margin = new Padding(3, 2, 3, 2);
             btnRefresh.Name = "btnRefresh";
-            btnRefresh.Size = new Size(100, 30);
+            btnRefresh.Size = new Size(88, 22);
             btnRefresh.TabIndex = 1;
             btnRefresh.Text = "Refresh";
             btnRefresh.UseVisualStyleBackColor = false;
@@ -313,9 +330,9 @@ namespace SafetyDetection.Manager
             label1.AutoSize = true;
             label1.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             label1.ForeColor = Color.White;
-            label1.Location = new Point(12, 15);
+            label1.Location = new Point(10, 11);
             label1.Name = "label1";
-            label1.Size = new Size(287, 37);
+            label1.Size = new Size(231, 30);
             label1.TabIndex = 2;
             label1.Text = "System Management";
             // 
@@ -325,12 +342,14 @@ namespace SafetyDetection.Manager
             rtbLiveFeed.Dock = DockStyle.Fill;
             rtbLiveFeed.Font = new Font("Consolas", 11F);
             rtbLiveFeed.ForeColor = Color.FromArgb(236, 240, 241);
-            rtbLiveFeed.Location = new Point(0, 60);
+            rtbLiveFeed.Location = new Point(0, 45);
+            rtbLiveFeed.Margin = new Padding(3, 2, 3, 2);
             rtbLiveFeed.Name = "rtbLiveFeed";
             rtbLiveFeed.ReadOnly = true;
-            rtbLiveFeed.Size = new Size(546, 740);
+            rtbLiveFeed.Size = new Size(478, 555);
             rtbLiveFeed.TabIndex = 0;
             rtbLiveFeed.Text = "Waiting for AI streams...\n";
+            rtbLiveFeed.TextChanged += rtbLiveFeed_TextChanged;
             // 
             // panelRightTop
             // 
@@ -339,8 +358,9 @@ namespace SafetyDetection.Manager
             panelRightTop.Controls.Add(label2);
             panelRightTop.Dock = DockStyle.Top;
             panelRightTop.Location = new Point(0, 0);
+            panelRightTop.Margin = new Padding(3, 2, 3, 2);
             panelRightTop.Name = "panelRightTop";
-            panelRightTop.Size = new Size(546, 60);
+            panelRightTop.Size = new Size(478, 45);
             panelRightTop.TabIndex = 1;
             // 
             // btnSimulate
@@ -348,9 +368,10 @@ namespace SafetyDetection.Manager
             btnSimulate.BackColor = Color.FromArgb(192, 57, 43);
             btnSimulate.FlatStyle = FlatStyle.Flat;
             btnSimulate.ForeColor = Color.White;
-            btnSimulate.Location = new Point(320, 15);
+            btnSimulate.Location = new Point(280, 11);
+            btnSimulate.Margin = new Padding(3, 2, 3, 2);
             btnSimulate.Name = "btnSimulate";
-            btnSimulate.Size = new Size(140, 30);
+            btnSimulate.Size = new Size(122, 22);
             btnSimulate.TabIndex = 0;
             btnSimulate.Text = "Start Simulation";
             btnSimulate.UseVisualStyleBackColor = false;
@@ -361,9 +382,9 @@ namespace SafetyDetection.Manager
             label2.AutoSize = true;
             label2.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             label2.ForeColor = Color.White;
-            label2.Location = new Point(12, 15);
+            label2.Location = new Point(10, 11);
             label2.Name = "label2";
-            label2.Size = new Size(297, 37);
+            label2.Size = new Size(236, 30);
             label2.TabIndex = 1;
             label2.Text = "Live AI Violation Feed";
             // 
@@ -374,10 +395,11 @@ namespace SafetyDetection.Manager
             // 
             // Form1
             // 
-            AutoScaleDimensions = new SizeF(8F, 20F);
+            AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1300, 800);
+            ClientSize = new Size(1138, 600);
             Controls.Add(splitContainer1);
+            Margin = new Padding(3, 2, 3, 2);
             Name = "Form1";
             Text = "Safety Detection Manager Dashboard";
             Load += Form1_Load;
@@ -391,6 +413,7 @@ namespace SafetyDetection.Manager
             splitContainerLeft.ResumeLayout(false);
             tabControlData.ResumeLayout(false);
             tabPageSites.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)picCameraPreview).EndInit();
             ((System.ComponentModel.ISupportInitialize)dataGridViewSites).EndInit();
             tabPageZones.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)dataGridViewZones).EndInit();
@@ -400,7 +423,6 @@ namespace SafetyDetection.Manager
             ((System.ComponentModel.ISupportInitialize)dataGridViewCriteria).EndInit();
             panelAnalytics.ResumeLayout(false);
             panelAnalytics.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)picCameraPreview).EndInit();
             panelLeftTop.ResumeLayout(false);
             panelLeftTop.PerformLayout();
             panelRightTop.ResumeLayout(false);

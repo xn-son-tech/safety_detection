@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
-from skimage import metrics
+
 
 
 FrameSource = Union[str, int, Path, np.ndarray]
@@ -50,19 +50,7 @@ class Preprocessor:
         if prev_frame is None:
             return False
 
-        current_gray = self._to_grayscale(current_frame)
-        previous_gray = self._to_grayscale(prev_frame)
-
-        if current_gray.shape != previous_gray.shape:
-            return True
-
-        ssim_score = metrics.structural_similarity(
-            current_gray,
-            previous_gray,
-            data_range=255,
-            full=False,
-        )
-        score = float(ssim_score[0] if isinstance(ssim_score, tuple) else ssim_score)
+        score = self._compute_ssim(current_frame, prev_frame)
         return score < float(threshold)
 
     def preprocess_frame(
@@ -164,13 +152,19 @@ class Preprocessor:
         if current_gray.shape != previous_gray.shape:
             return 0.0
 
-        ssim_result = metrics.structural_similarity(
-            current_gray,
-            previous_gray,
-            data_range=255,
-            full=False,
-        )
-        return float(ssim_result[0] if isinstance(ssim_result, tuple) else ssim_result)
+        # Sử dụng thuật toán MSE siêu nhẹ thay cho SSIM cấu trúc
+        curr_small = cv2.resize(current_gray, (64, 48))
+        prev_small = cv2.resize(previous_gray, (64, 48))
+        
+        err = cv2.norm(curr_small, prev_small, cv2.NORM_L2)
+        mse = (err * err) / float(64 * 48)
+        
+        # Chuyển đổi MSE thành thang đo SSIM giả lập (Tỷ lệ nghịch)
+        # Giới hạn MSE từ 0 đến khoảng 2000+. MSE càng cao -> Khác biệt càng lớn (SSIM gần 0)
+        max_error = 1500.0
+        pseudo_ssim = max(0.0, 1.0 - (mse / max_error))
+        
+        return float(pseudo_ssim)
 
     def _laplacian_variance(self, frame: np.ndarray) -> float:
         gray_frame = self._to_grayscale(frame)
