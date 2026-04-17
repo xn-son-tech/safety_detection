@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 
+import argparse
 import cv2
 import numpy as np
 
@@ -25,6 +26,9 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from src.ai_helmet_detection.alert_validation import TrackViolationValidator
 from src.ai_helmet_detection.core_detection.preprocessor import Preprocessor
@@ -48,9 +52,9 @@ EVIDENCE_SCALE_FACTOR = 2.5
 INFERENCE_IMAGE_SIZE = 640
 # Per-class confidence thresholds — used to disambiguate between similar
 # visual categories (e.g. white helmet vs. bare head).
-THRESHOLD_HELMET    = 0.30   # permissive: catches white / light-coloured helmets
-THRESHOLD_OTHER_HAT = 0.45   # standard
-THRESHOLD_NO_HELMET = 0.60   # strict: suppresses false no-helmet violations
+THRESHOLD_HELMET    = 0.25   # permissive
+THRESHOLD_OTHER_HAT = 0.25   # lowered to ensure we catch minor non-construction hats
+THRESHOLD_NO_HELMET = 0.25   # lowered to rely on 24/30 temporal smoothing rather than blind YOLO score
 # The base threshold sent to YOLO is the minimum per-class value so that all
 # potentially valid detections reach the per-class filter below.
 HELMET_CONFIDENCE_THRESHOLD = THRESHOLD_HELMET
@@ -84,12 +88,53 @@ CLASS_COLORS: dict[str, tuple[int, int, int]] = {
 
 CLASS_THRESHOLDS = {
     "helmet": THRESHOLD_HELMET,
-    "other_hat": THRESHOLD_OTHER_HAT,
-    "no_helmet": THRESHOLD_NO_HELMET,
+    "other hat": THRESHOLD_OTHER_HAT,
+    "no helmet": THRESHOLD_NO_HELMET,
 }
 
 _FRAME_CLAHE = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT, tileGridSize=CLAHE_TILE_GRID)
 
+class UniversalVideoSource:
+    def __init__(self, source_url):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "fflags;nobuffer|flags;low_delay"
+        self.source_url = source_url
+        self.cap = cv2.VideoCapture(self.source_url)
+        
+        if isinstance(self.source_url, int) or (isinstance(self.source_url, str) and self.source_url.isdigit()):
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Could not open source {source_url}.")
+            
+        self.latest_frame = None
+        self.is_running = True
+        self.lock = threading.Lock()
+        
+        self.thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.thread.start()
+
+    def _capture_loop(self):
+        while self.is_running:
+            ret, frame = self.cap.read()
+            if not ret:
+                time.sleep(0.01) 
+                continue
+            with self.lock:
+                self.latest_frame = frame
+
+    def read(self):
+        with self.lock:
+            if self.latest_frame is None:
+                return False, None
+            return True, self.latest_frame.copy()
+
+    def release(self):
+        self.is_running = False
+        self.thread.join(timeout=1.0)
+        self.cap.release()
 
 def _normalize_class_name(class_name: str) -> str:
     return class_name.lower().replace(" ", "_")
@@ -171,18 +216,18 @@ def build_person_validation_results(
             elif normalized == "no_helmet":
                 has_no_helmet = True
 
-        if has_no_helmet:
-            status_label = "No Helmet"
-            is_violation = True
+        if has_helmet:
+            status_label = "Helmet"
+            is_violation = False
         elif has_other_hat:
             status_label = "Other Hat"
             is_violation = True
-        elif has_helmet:
-            status_label = "Helmet"
-            is_violation = False
+        elif has_no_helmet:
+            status_label = "No Helmet"
+            is_violation = True
         else:
-            status_label = "Safe"
-            is_violation = False
+            status_label = "No Helmet"
+            is_violation = True
 
         status_labels[person.track_id] = status_label
         results.append(
@@ -537,6 +582,10 @@ def build_inspector_panel(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Helmet Detection Real-time Demo")
+    parser.add_argument("--source", type=str, default="0", help="Camera source (0 for webcam, or RTSP/HTTP URL for IP Camera)")
+    args = parser.parse_args()
+
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Trained model not found: {MODEL_PATH}")
     model_size = MODEL_PATH.stat().st_size
@@ -567,11 +616,14 @@ def main() -> None:
         ),
     )
 
-    capture = cv2.VideoCapture(0)
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    if not capture.isOpened():
-        raise RuntimeError("Could not open webcam source 0.")
+    source = args.source
+    if source.isdigit():
+        source = int(source)
+
+    try:
+        capture = UniversalVideoSource(source)
+    except Exception as e:
+        raise RuntimeError(f"Could not open source {source}: {e}")
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW_NAME, 1280, 720)
@@ -581,70 +633,71 @@ def main() -> None:
     cv2.resizeWindow(INSPECTOR_WINDOW_NAME, INSPECTOR_THUMB_W * 2 + 20, 350)
     cv2.moveWindow(INSPECTOR_WINDOW_NAME, 1300, 0)  # position to the right of the main window
 
-    # Higher capture/display resolution improves demo clarity but can reduce FPS on CPU.
-    # Keep YOLO inference at imgsz=640; if frame resizing is needed before inference,
-    # use cv2.resize(..., interpolation=cv2.INTER_LINEAR) for a balanced speed/quality tradeoff.
-
     preprocessor = Preprocessor(
         blur_threshold=PREPROCESSOR_BLUR_THRESHOLD,
         ssim_threshold=PREPROCESSOR_SSIM_THRESHOLD,
         ssim_check_interval=PREPROCESSOR_SSIM_INTERVAL,
     )
 
-    previous_frame_time = time.perf_counter()
-    previous_frame_for_glitch: cv2.typing.MatLike | None = None
-    active_events: dict[int, tuple[datetime, float]] = {}
-    alert_stop_event: threading.Event | None = None
-    last_helmet_detections: list[Detection] = []
-    last_validation_results: list[PersonValidationResult] = []
-    last_person_status_labels: dict[int, str] = {}
-    last_roi_inspector_data: list[tuple[int, np.ndarray, np.ndarray, float]] = []
+    is_running = [True]
+    shared_state = {
+        "raw_frame": None,
+        "enhanced_frame": None,
+        "preprocess_result": None,
+        "ai_data": None
+    }
+    state_lock = threading.Lock()
 
-    try:
-        while True:
+    def camera_worker():
+        no_frame_count = 0
+        while is_running[0]:
             ok, frame = capture.read()
             if not ok:
-                print("Failed to read frame from webcam.")
-                break
+                no_frame_count += 1
+                if no_frame_count > 500: # 5 seconds without frames = dead
+                    is_running[0] = False
+                    break
+                time.sleep(0.01)
+                continue
+            
+            no_frame_count = 0
+            with state_lock:
+                shared_state["raw_frame"] = frame.copy()
+            time.sleep(0.01)
+
+    def ai_worker():
+        previous_frame_for_glitch = None
+        while is_running[0]:
+            with state_lock:
+                frame = shared_state["raw_frame"].copy() if shared_state["raw_frame"] is not None else None
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
 
             preprocess_result = preprocessor.process(frame, previous_frame_for_glitch)
             previous_frame_for_glitch = frame
-            display_frame = frame.copy()
             enhanced_frame = enhance_frame(preprocess_result.cleaned_frame)
-            print(
-                f"Status: Blur={preprocess_result.blur_score:.2f}, "
-                f"SSIM={preprocess_result.ssim_score:.3f}, "
-                f"Process={preprocess_result.should_process}"
-            )
-            current_time = time.perf_counter()
 
+            ai_data = None
             if preprocess_result.should_process:
                 frame_result = system.process_frame(enhanced_frame)
-                # Apply per-class confidence filtering: discard detections whose
-                # confidence is below the class-specific threshold.  This prevents
-                # ambiguous low-score "no helmet" predictions from being treated as
-                # violations while still preserving low-scoring helmet detections.
                 thresholded_detections = filter_detections_by_class_threshold(
                     frame_result.helmet_detections,
                     per_class_thresholds=CLASS_THRESHOLDS,
                 )
-                # Spatial constraint: only keep headwear detections around the head zone.
                 last_helmet_detections = filter_detections_by_spatial_constraint(
                     thresholded_detections,
                     frame_result.tracked_persons,
                     head_top_ratio=HEAD_SPATIAL_TOP_RATIO,
                 )
-                # Unified rule: violation only when other_hat/no_helmet remains after
-                # threshold + spatial filtering and no valid helmet is present.
                 last_validation_results, last_person_status_labels = build_person_validation_results(
                     frame_result.tracked_persons,
                     last_helmet_detections,
                     head_top_ratio=HEAD_SPATIAL_TOP_RATIO,
                 )
 
-                # Collect head-ROI crops: apply adaptive CLAHE per person, log brightness,
-                # and store (raw, enhanced) pairs for the Inspector Window.
-                _frame_roi_data: list[tuple[int, np.ndarray, np.ndarray, float]] = []
+                _frame_roi_data = []
                 for _r in last_validation_results:
                     _rx1, _ry1, _rx2, _ry2 = _r.head_roi
                     if _rx2 > _rx1 and _ry2 > _ry1:
@@ -657,44 +710,83 @@ def main() -> None:
                             _frame_roi_data.append(
                                 (_r.track_id, _roi_crop.copy(), _enhanced, _brightness)
                             )
-                last_roi_inspector_data = _frame_roi_data
-
-                current_confirmed = {
-                    result.track_id: result
-                    for result in last_validation_results
-                    if result.confirmed_violation
+                ai_data = {
+                    "helmet_detections": last_helmet_detections,
+                    "validation_results": last_validation_results,
+                    "person_status_labels": last_person_status_labels,
+                    "roi_inspector_data": _frame_roi_data
                 }
-                visible_track_ids = {result.track_id for result in last_validation_results}
 
-                ended_track_ids = set(active_events) - set(current_confirmed)
-                for track_id in ended_track_ids:
-                    if track_id not in visible_track_ids or track_id not in current_confirmed:
-                        started_at, started_perf = active_events.pop(track_id)
-                        finalize_violation(track_id, started_at, started_perf)
+            with state_lock:
+                shared_state["preprocess_result"] = preprocess_result
+                shared_state["enhanced_frame"] = enhanced_frame
+                if ai_data is not None:
+                    shared_state["ai_data"] = ai_data
 
-                if not active_events and alert_stop_event is not None:
-                    alert_stop_event.set()
-                    alert_stop_event = None
+    t_cam = threading.Thread(target=camera_worker, daemon=True)
+    t_ai = threading.Thread(target=ai_worker, daemon=True)
+    t_cam.start()
+    t_ai.start()
 
-                new_confirmed_ids = set(current_confirmed) - set(active_events)
-                for track_id in new_confirmed_ids:
-                    result = current_confirmed[track_id]
-                    started_at = datetime.now()
-                    started_perf = time.perf_counter()
-                    active_events[track_id] = (started_at, started_perf)
-                    log_violation_started()
-                    snapshot_path = save_violation_crop(
-                        frame,
-                        track_id,
-                        result.person_box,
-                        result.confidence,
-                        started_at,
-                    )
-                    print(f"Violation snapshot saved: {snapshot_path}")
-                    if alert_stop_event is None or alert_stop_event.is_set():
-                        alert_stop_event = threading.Event()
-                        threading.Thread(target=alert_sound_loop, args=(alert_stop_event,), daemon=True).start()
-                    speak_warning_async()
+    previous_frame_time = time.perf_counter()
+    active_events: dict[int, tuple[datetime, float]] = {}
+    alert_stop_event: threading.Event | None = None
+
+    try:
+        while is_running[0]:
+            current_time = time.perf_counter()
+            with state_lock:
+                display_frame = shared_state["raw_frame"].copy() if shared_state["raw_frame"] is not None else None
+                enhanced_frame = shared_state["enhanced_frame"].copy() if shared_state["enhanced_frame"] is not None else None
+                prep_res = shared_state["preprocess_result"]
+                ai_data_ref = shared_state["ai_data"]
+                ai_data = ai_data_ref.copy() if ai_data_ref else None
+
+            if display_frame is None or prep_res is None:
+                time.sleep(0.01)
+                continue
+
+            last_helmet_detections = ai_data["helmet_detections"] if ai_data else []
+            last_validation_results = ai_data["validation_results"] if ai_data else []
+            last_person_status_labels = ai_data["person_status_labels"] if ai_data else {}
+            last_roi_inspector_data = ai_data["roi_inspector_data"] if ai_data else []
+
+            current_confirmed = {
+                result.track_id: result
+                for result in last_validation_results
+                if result.confirmed_violation
+            }
+            visible_track_ids = {result.track_id for result in last_validation_results}
+
+            ended_track_ids = set(active_events) - set(current_confirmed)
+            for track_id in ended_track_ids:
+                if track_id not in visible_track_ids or track_id not in current_confirmed:
+                    started_at, started_perf = active_events.pop(track_id)
+                    finalize_violation(track_id, started_at, started_perf)
+
+            if not active_events and alert_stop_event is not None:
+                alert_stop_event.set()
+                alert_stop_event = None
+
+            new_confirmed_ids = set(current_confirmed) - set(active_events)
+            for track_id in new_confirmed_ids:
+                result = current_confirmed[track_id]
+                started_at = datetime.now()
+                started_perf = time.perf_counter()
+                active_events[track_id] = (started_at, started_perf)
+                log_violation_started()
+                snapshot_path = save_violation_crop(
+                    display_frame,
+                    track_id,
+                    result.person_box,
+                    result.confidence,
+                    started_at,
+                )
+                print(f"Violation snapshot saved: {snapshot_path}")
+                if alert_stop_event is None or alert_stop_event.is_set():
+                    alert_stop_event = threading.Event()
+                    threading.Thread(target=alert_sound_loop, args=(alert_stop_event,), daemon=True).start()
+                speak_warning_async()
 
             for detection in last_helmet_detections:
                 draw_detection(display_frame, detection)
@@ -726,11 +818,11 @@ def main() -> None:
             )
             draw_preprocessing_overlay(
                 display_frame,
-                preprocess_result.blur_score,
-                preprocess_result.ssim_score,
-                preprocess_result.is_blurred,
-                preprocess_result.is_glitch,
-                not preprocess_result.should_process,
+                prep_res.blur_score,
+                prep_res.ssim_score,
+                prep_res.is_blurred,
+                prep_res.is_glitch,
+                not prep_res.should_process,
             )
 
             if active_events:
@@ -747,26 +839,26 @@ def main() -> None:
                 )
 
             cv2.imshow(WINDOW_NAME, display_frame)
-            cv2.imshow(
-                ENHANCED_WINDOW_NAME,
-                cv2.resize(enhanced_frame, (480, 270), interpolation=cv2.INTER_LINEAR),
-            )
-
-            # Inspector Window: show RAW vs CLAHE-enhanced head ROI for each tracked person.
-            # Diagnostic only — no re-inference is performed on these crops.
+            if enhanced_frame is not None:
+                cv2.imshow(
+                    ENHANCED_WINDOW_NAME,
+                    cv2.resize(enhanced_frame, (480, 270), interpolation=cv2.INTER_LINEAR),
+                )
+                
             inspector_panel = build_inspector_panel(last_roi_inspector_data)
             cv2.imshow(INSPECTOR_WINDOW_NAME, inspector_panel)
 
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            if cv2.waitKey(20) & 0xFF == ord("q"):
+                is_running[0] = False
                 break
     finally:
+        is_running[0] = False
         if alert_stop_event is not None:
             alert_stop_event.set()
         for track_id, (started_at, started_perf) in list(active_events.items()):
             finalize_violation(track_id, started_at, started_perf)
         capture.release()
         cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()

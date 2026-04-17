@@ -54,17 +54,17 @@ def get_latest_frame():
 
 def run_pipeline(source_url: str, backend_api_url: str, site_id: str, camera_id: str):
     global current_frame
-    # Assumes models are in CWD
+    
     tracker = YoloWorkerTracker(model_path="helmet_v2_final.pt")
     
     # Custom Validator: Khớp nhịp vụ Async AI
     # Đưa window_size về 1 (Tức là chỉ cần 1 khung hình xuất hiện vi phạm là Bắt ngay lập tức)
     # Khắc phục triệt để tình trạng người chuyển động làm đứt chuỗi Track_ID.
-    validator = ViolationValidator(window_size=1, alert_threshold=0.0, cooldown_seconds=2.0)
+    validator = ViolationValidator(window_size=1, alert_threshold=0.0, cooldown_seconds=5.0)
     
     pipeline = WorkerSafetyPipeline(tracker=tracker, validator=validator)
     
-    print(f"[*] Starting ASYNC Pipeline on source: {source_url}")
+    print(f"[*] Starting ASYNC WorkerSafetyPipeline Pipeline on source: {source_url}")
     print(f"[*] MJPEG streaming on /stream (V2 - 30 FPS Smooth)")
     print(f"[*] Outbound backend API: {backend_api_url}")
     

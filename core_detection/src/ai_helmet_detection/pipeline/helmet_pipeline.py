@@ -201,9 +201,18 @@ class WorkerSafetyPipeline:
         """
         import threading
         import time
+        import os
+        
+        # Tắt cơ chế đệm mạng mặc định của FFmpeg để chống trễ (delay) khi cấp nguồn IP Camera
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "fflags;nobuffer|flags;low_delay"
 
         normalized_source = self._normalize_source(source)
         capture = cv2.VideoCapture(normalized_source)
+        
+        if isinstance(normalized_source, int) or (isinstance(normalized_source, str) and normalized_source.isdigit()):
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not capture.isOpened():
             raise ValueError(f"Unable to open source: {source}")
@@ -630,3 +639,143 @@ class HelmetSystem:
                 )
             )
         return tracked_persons
+
+    def async_run(
+        self,
+        source: FrameSource,
+        max_frames: int = 0,
+    ) -> Iterator[PipelineFrame]:
+        import threading
+        import time
+
+        normalized_source = WorkerSafetyPipeline._normalize_source(source)
+        capture = cv2.VideoCapture(normalized_source)
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if not capture.isOpened():
+            raise ValueError(f"Unable to open source: {source}")
+
+        self._is_running = True
+        self._shared_raw_frame = None
+        self._shared_ai_result = None
+        self._shared_frame_index = 0
+        
+        source_fps = capture.get(cv2.CAP_PROP_FPS)
+        source_fps = source_fps if source_fps > 0 else 30.0
+        source_start_time = datetime.now(timezone.utc)
+
+        def camera_worker():
+            frame_idx = 0
+            while self._is_running:
+                has_frame, frame = capture.read()
+                if not has_frame:
+                    self._is_running = False
+                    break
+                frame = cv2.resize(frame, (640, 480))
+                self._shared_raw_frame = frame
+                frame_idx += 1
+                self._shared_frame_index = frame_idx
+                time.sleep(0.016)
+
+        def ai_worker():
+            while self._is_running:
+                frame = self._shared_raw_frame
+                frame_idx = self._shared_frame_index
+                if frame is None:
+                    time.sleep(0.02)
+                    continue
+
+                current_frame_copy = frame.copy()
+                
+                engine_result = self.process_frame(current_frame_copy)
+                
+                source_time_seconds = WorkerSafetyPipeline._resolve_source_time_seconds(capture, frame_idx, source_fps)
+                event_time = source_start_time + timedelta(seconds=source_time_seconds)
+
+                alerts = []
+                for val in engine_result.validation_results:
+                    if val.confirmed_violation:
+                        alerts.append(OfficialAlert(
+                            frame_index=frame_idx,
+                            track_id=val.track_id,
+                            event_time=event_time.isoformat(),
+                            source_time_seconds=source_time_seconds,
+                            violation_ratio=val.violation_ratio,
+                            evidence_path=Path('fake'),
+                            metadata_path=Path('fake'),
+                            csv_path=Path('fake'),
+                            subject_box=val.person_box
+                        ))
+
+                self._shared_ai_result = {
+                    "accepted": engine_result.preprocessing.inference_allowed,
+                    "metrics": {
+                        "ssim": 1.0,
+                        "laplacian_variance": engine_result.preprocessing.blur_score,
+                    },
+                    "validation_results": engine_result.validation_results,
+                    "alerts": alerts,
+                    "drop_reason": "low_ssim" if not engine_result.preprocessing.inference_allowed else None,
+                    "event_time": event_time,
+                    "source_time_seconds": source_time_seconds,
+                }
+
+        t_cam = threading.Thread(target=camera_worker)
+        t_cam.daemon = True
+        t_cam.start()
+
+        t_ai = threading.Thread(target=ai_worker)
+        t_ai.daemon = True
+        t_ai.start()
+
+        try:
+            while self._is_running:
+                frame = self._shared_raw_frame
+                ai_res = self._shared_ai_result
+                
+                if frame is not None and ai_res is not None:
+                    display_frame = frame.copy()
+                    
+                    status_text = "ACCEPTED" if ai_res["accepted"] else f"DROPPED: {ai_res['drop_reason']}"
+                    status_color = (60, 180, 75) if ai_res["accepted"] else (0, 0, 255)
+                    cv2.putText(display_frame, status_text, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+                    
+                    for val in ai_res["validation_results"]:
+                        x1, y1, x2, y2 = val.person_box
+                        hx1, hy1, hx2, hy2 = val.head_roi
+                        
+                        if val.potential_violation:
+                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                            cv2.rectangle(display_frame, (hx1, hy1), (hx2, hy2), (0, 165, 255), 2)
+                            label = f"Violation ID={val.track_id} (M={val.material_score:.2f})"
+                            cv2.putText(display_frame, label, (x1, max(y1 - 8, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                        elif val.material_override:
+                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (60, 180, 75), 2)
+                            label = f"SAFE (Override) ID={val.track_id}"
+                            cv2.putText(display_frame, label, (x1, max(y1 - 8, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 180, 75), 2)
+                        else:
+                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (60, 180, 75), 2)
+                            label = f"SAFE ID={val.track_id}"
+                            cv2.putText(display_frame, label, (x1, max(y1 - 8, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 180, 75), 2)
+
+                    for alert in ai_res["alerts"]:
+                        ax1, ay1, _, _ = alert.subject_box
+                        label = f"ALERT ID={alert.track_id} ratio={alert.violation_ratio:.2f}"
+                        cv2.putText(display_frame, label, (int(ax1), int(ay1) + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+                    yield PipelineFrame(
+                        frame_index=self._shared_frame_index,
+                        event_time=ai_res["event_time"],
+                        source_time_seconds=ai_res["source_time_seconds"],
+                        accepted=ai_res["accepted"],
+                        display_frame=display_frame,
+                        preprocessing_metrics=ai_res["metrics"],
+                        tracking_frame=None,
+                        violations=[], 
+                        official_alerts=ai_res["alerts"],
+                        drop_reason=ai_res["drop_reason"],
+                    )
+                time.sleep(0.033)
+                
+        finally:
+            self._is_running = False
+            capture.release()
