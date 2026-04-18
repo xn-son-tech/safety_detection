@@ -1,0 +1,332 @@
+// Use DBML to define your database structure
+// Docs: https://dbml.dbdiagram.io/docs
+
+Table sites {
+  id uuid [pk]
+  code varchar [not null, unique]
+  name varchar [not null]
+  timezone varchar [not null, default: 'Asia/Ho_Chi_Minh']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table zones {
+  id uuid [pk]
+  site_id uuid [not null]
+  code varchar [not null]
+  name varchar [not null]
+  description text
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Indexes {
+    (site_id, code) [unique]
+  }
+}
+
+Table cameras {
+  id uuid [pk]
+  site_id uuid [not null]
+  zone_id uuid
+  code varchar [not null]
+  name varchar [not null]
+  rtsp_url text [note: 'Store encrypted or in a secrets manager in production']
+  status varchar [not null, default: 'active', note: 'active|inactive|maintenance']
+  fps_config integer [default: 25]
+  resolution_w integer
+  resolution_h integer
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Indexes {
+    (site_id, code) [unique]
+  }
+}
+
+// --- Extensible PPE / safety criteria (add criteria + rules without schema churn) ---
+
+Table safety_criteria {
+  id uuid [pk]
+  code varchar [not null, unique, note: 'Stable code: NO_HELMET, NO_REFLECTIVE_VEST, NO_GLOVES, ...']
+  name varchar [not null]
+  description text
+  is_active boolean [not null, default: true, note: 'false = disabled globally; historical rows keep FK integrity']
+  sort_order integer [not null, default: 0]
+  default_severity integer [not null, default: 1]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table rule_definitions {
+  id uuid [pk]
+  criterion_id uuid [not null]
+  code varchar [not null, note: 'Stable rule id, e.g. helmet_head_iou, vest_torso_iou']
+  version varchar [not null, note: 'Semantic version string, e.g. 1.0.0']
+  name varchar [not null]
+  is_active boolean [not null, default: true]
+  is_default boolean [not null, default: false, note: 'One default active rule per criterion at runtime']
+  definition json [not null, note: 'YOLO class names, anchor class (person), IoU targets, voting window, geometry hints']
+  created_at timestamp [not null]
+
+  Indexes {
+    (criterion_id, code, version) [unique]
+    (criterion_id, is_default)
+  }
+}
+
+// Per-camera enable/disable and optional rule override (add/remove criteria by config)
+Table camera_criterion_assignments {
+  id uuid [pk]
+  camera_id uuid [not null]
+  criterion_id uuid [not null]
+  is_enabled boolean [not null, default: true]
+  rule_definition_id uuid [note: 'If null, runtime uses criterion default active rule_definitions row']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Indexes {
+    (camera_id, criterion_id) [unique]
+  }
+}
+
+Table model_versions {
+  id uuid [pk]
+  name varchar [not null]
+  version varchar [not null]
+  classes json [note: 'Union of YOLO class names this checkpoint outputs, e.g. person, helmet, reflective_vest, glove, ...']
+  confidence_threshold decimal(5,4)
+  iou_threshold decimal(5,4)
+  is_active boolean [not null, default: false]
+  created_at timestamp [not null]
+
+  Indexes {
+    (name, version) [unique]
+  }
+}
+
+Table processing_runs {
+  id uuid [pk]
+  camera_id uuid [not null]
+  model_version_id uuid
+  stream_started_at timestamp [not null]
+  stream_ended_at timestamp
+  status varchar [not null, default: 'running', note: 'running|success|failed|stopped']
+  config_snapshot json [note: 'Thresholds, sliding window, cooldown, tracker settings']
+  error_message text
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Indexes {
+    (camera_id, stream_started_at)
+    (status, stream_started_at)
+  }
+}
+
+Table frame_preprocessing_logs {
+  id bigint [pk, increment]
+  run_id uuid [not null]
+  camera_id uuid [not null]
+  frame_ts timestamp [not null]
+  frame_seq bigint
+  ssim_score decimal(6,5)
+  laplacian_var decimal(10,4)
+  clahe_applied boolean [not null, default: false]
+  quality_state varchar [not null, note: 'passed|dropped_glitch|dropped_blur|dropped_other']
+  drop_reason varchar [note: 'rtsp_glitch|packet_loss|motion_blur|occlusion|unknown']
+  extra json
+  created_at timestamp [not null]
+
+  Indexes {
+    (camera_id, frame_ts)
+    (run_id, frame_seq)
+    (quality_state, frame_ts)
+  }
+}
+
+Table detections {
+  id bigint [pk, increment]
+  camera_id uuid [not null]
+  run_id uuid
+  model_version_id uuid
+  frame_ts timestamp [not null]
+  frame_seq bigint
+  track_id varchar [note: 'Tracker-generated ID, not a real identity']
+  class_name varchar [not null, note: 'YOLO output label; extend as model adds PPE classes']
+  confidence decimal(5,4)
+  bbox_x1 integer [not null]
+  bbox_y1 integer [not null]
+  bbox_x2 integer [not null]
+  bbox_y2 integer [not null]
+  is_edge_truncated boolean [not null, default: false]
+  extra json
+  created_at timestamp [not null]
+
+  Indexes {
+    (camera_id, frame_ts)
+    (track_id, frame_ts)
+    (class_name, frame_ts)
+  }
+}
+
+Table violations {
+  id uuid [pk]
+  camera_id uuid [not null]
+  site_id uuid [not null]
+  zone_id uuid
+  run_id uuid
+  criterion_id uuid [not null]
+  rule_definition_id uuid [note: 'Rule version that produced this violation']
+  track_id varchar [not null]
+  severity integer [not null, default: 1]
+  started_at timestamp [not null]
+  confirmed_at timestamp [not null]
+  ended_at timestamp
+  status varchar [not null, default: 'open', note: 'open|acknowledged|resolved|ignored']
+  cooldown_until timestamp
+  vote_total_frames integer [not null, default: 30]
+  vote_violation_frames integer [not null, default: 25]
+  aspect_ratio decimal(8,5) [note: 'Helmet / head-geometry rules; null for other criteria']
+  head_region_bbox json [note: 'Helmet rule; null when not applicable']
+  primary_iou decimal(5,4) [note: 'Criterion-dependent: e.g. helmet-head IoU, vest-torso IoU']
+  evaluation_metrics json [note: 'Extra numeric scores per criterion (glove-hand IoU, etc.)']
+  rule_snapshot json [note: 'Frozen copy of rule_definitions.definition + thresholds at confirm time']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Indexes {
+    (camera_id, confirmed_at)
+    (criterion_id, confirmed_at)
+    (status, confirmed_at)
+    (track_id, confirmed_at)
+  }
+}
+
+Table rule_evaluations {
+  id bigint [pk, increment]
+  run_id uuid
+  camera_id uuid [not null]
+  criterion_id uuid [not null]
+  rule_definition_id uuid
+  frame_ts timestamp [not null]
+  frame_seq bigint
+  track_id varchar [not null]
+  rule_code varchar [not null, note: 'Denormalized from rule_definitions.code for fast filtering']
+  vote_window integer [not null, default: 30]
+  vote_positive integer [not null, default: 0]
+  vote_negative integer [not null, default: 0]
+  decision varchar [not null, note: 'safe|danger|cooldown_skip|insufficient_evidence']
+  primary_iou decimal(5,4) [note: 'Criterion-dependent main overlap score']
+  aspect_ratio decimal(8,5)
+  details json
+  created_at timestamp [not null]
+
+  Indexes {
+    (camera_id, frame_ts)
+    (criterion_id, frame_ts)
+    (track_id, frame_ts)
+    (decision, frame_ts)
+  }
+}
+
+Table violation_evidences {
+  id uuid [pk]
+  violation_id uuid [not null]
+  capture_ts timestamp [not null]
+  image_path text [not null, note: 'Filesystem path or object storage key']
+  image_sha256 varchar(64)
+  width integer
+  height integer
+  person_bbox json [note: 'Example: {"x1":1,"y1":2,"x2":3,"y2":4}']
+  equipment_bbox json [note: 'Generic PPE box: helmet, vest, gloves region, etc.']
+  helmet_bbox json [note: 'Legacy alias for helmet criterion; prefer equipment_bbox']
+  meta json
+  created_at timestamp [not null]
+
+  Indexes {
+    (violation_id, capture_ts)
+  }
+}
+
+Table alerts {
+  id bigint [pk, increment]
+  violation_id uuid [not null]
+  channel varchar [not null, note: 'websocket|mobile|email|sms']
+  sent_at timestamp [not null]
+  delivery_status varchar [not null, default: 'queued', note: 'queued|sent|failed']
+  response json
+
+  Indexes {
+    (violation_id, sent_at)
+  }
+}
+
+Table camera_health_logs {
+  id bigint [pk, increment]
+  camera_id uuid [not null]
+  logged_at timestamp [not null]
+  event_type varchar [not null, note: 'rtsp_glitch|lens_occlusion|low_fps|decoder_error']
+  level varchar [not null, default: 'info', note: 'info|warn|error']
+  message text
+  metrics json
+
+  Indexes {
+    (camera_id, logged_at)
+    (event_type, logged_at)
+  }
+}
+
+Ref zones_site: zones.site_id > sites.id
+Ref cameras_site: cameras.site_id > sites.id
+Ref cameras_zone: cameras.zone_id > zones.id
+Ref rules_criterion: rule_definitions.criterion_id > safety_criteria.id
+Ref assign_camera: camera_criterion_assignments.camera_id > cameras.id
+Ref assign_criterion: camera_criterion_assignments.criterion_id > safety_criteria.id
+Ref assign_rule: camera_criterion_assignments.rule_definition_id > rule_definitions.id
+Ref runs_camera: processing_runs.camera_id > cameras.id
+Ref runs_model_version: processing_runs.model_version_id > model_versions.id
+Ref preprocess_run: frame_preprocessing_logs.run_id > processing_runs.id
+Ref preprocess_camera: frame_preprocessing_logs.camera_id > cameras.id
+Ref detections_camera: detections.camera_id > cameras.id
+Ref detections_run: detections.run_id > processing_runs.id
+Ref detections_model_version: detections.model_version_id > model_versions.id
+Ref violations_camera: violations.camera_id > cameras.id
+Ref violations_site: violations.site_id > sites.id
+Ref violations_zone: violations.zone_id > zones.id
+Ref violations_run: violations.run_id > processing_runs.id
+Ref violations_criterion: violations.criterion_id > safety_criteria.id
+Ref violations_rule: violations.rule_definition_id > rule_definitions.id
+Ref rule_eval_run: rule_evaluations.run_id > processing_runs.id
+Ref rule_eval_camera: rule_evaluations.camera_id > cameras.id
+Ref rule_eval_criterion: rule_evaluations.criterion_id > safety_criteria.id
+Ref rule_eval_rule_def: rule_evaluations.rule_definition_id > rule_definitions.id
+Ref evidences_violation: violation_evidences.violation_id > violations.id
+Ref alerts_violation: alerts.violation_id > violations.id
+Ref camera_health_camera: camera_health_logs.camera_id > cameras.id
+
+Records sites(id, code, name, timezone) {
+  '00000000-0000-0000-0000-000000000001', 'SITE-A', 'Cong truong A', 'Asia/Ho_Chi_Minh'
+}
+
+Records zones(id, site_id, code, name) {
+  '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'ZONE-1', 'Khu mong'
+}
+
+Records cameras(id, site_id, zone_id, code, name, status, fps_config) {
+  '00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000011', 'CAM-01', 'Camera cong so 1', 'active', 25
+}
+
+Records model_versions(id, name, version, is_active) {
+  '00000000-0000-0000-0000-000000001001', 'yolov8s-helmet', '2026.04.1', true
+}
+
+Records safety_criteria(id, code, name, is_active, sort_order, default_severity, created_at, updated_at) {
+  '00000000-0000-0000-0000-000000002001', 'NO_HELMET', 'Missing safety helmet', true, 10, 1, '2026-01-01 00:00:00', '2026-01-01 00:00:00'
+}
+
+Records rule_definitions(id, criterion_id, code, version, name, is_active, is_default, definition, created_at) {
+  '00000000-0000-0000-0000-000000003001', '00000000-0000-0000-0000-000000002001', 'helmet_head_iou', '1.0.0', 'Helmet vs head region IoU', true, true, '{}', '2026-01-01 00:00:00'
+}
+
+Records camera_criterion_assignments(id, camera_id, criterion_id, is_enabled, created_at, updated_at) {
+  '00000000-0000-0000-0000-000000004001', '00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000002001', true, '2026-01-01 00:00:00', '2026-01-01 00:00:00'
+}
