@@ -584,6 +584,7 @@ def build_inspector_panel(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Helmet Detection Real-time Demo")
     parser.add_argument("--source", type=str, default="0", help="Camera source (0 for webcam, or RTSP/HTTP URL for IP Camera)")
+    parser.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], default=0, help="Rotate camera frame by 90, 180, or 270 degrees clockwise")
     args = parser.parse_args()
 
     if not MODEL_PATH.exists():
@@ -661,6 +662,14 @@ def main() -> None:
                 continue
             
             no_frame_count = 0
+            
+            if args.rotate == 90:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            elif args.rotate == 180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            elif args.rotate == 270:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
             with state_lock:
                 shared_state["raw_frame"] = frame.copy()
             time.sleep(0.01)
