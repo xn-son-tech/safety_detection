@@ -163,8 +163,16 @@ def _in_person_head_top_zone(
     center_y = 0.5 * (dy1 + dy2)
     px1, py1, px2, py2 = person_box
     person_h = max(py2 - py1, 1)
+    person_w = max(px2 - px1, 1)
+    
+    # Mở rộng biên x/y để cứu các ca bị YOLO cắt đầu (Selfie view)
+    margin_x = int(person_w * 0.35)
+    margin_top = int(person_h * 0.5) 
+    
+    head_top = py1 - margin_top
     head_bottom = py1 + int(person_h * head_top_ratio)
-    return px1 <= center_x <= px2 and py1 <= center_y <= head_bottom
+    
+    return (px1 - margin_x) <= center_x <= (px2 + margin_x) and head_top <= center_y <= head_bottom
 
 
 def filter_detections_by_spatial_constraint(
@@ -686,7 +694,10 @@ def main() -> None:
 
             preprocess_result = preprocessor.process(frame, previous_frame_for_glitch)
             previous_frame_for_glitch = frame
-            enhanced_frame = enhance_frame(preprocess_result.cleaned_frame)
+            
+            # TRỌNG TÂM FIX BUG ĐÂY:
+            # Ngăn chặn việc Enhance/CLAHE đè lên nhau 2 lần liên tiếp gây cháy ảnh hỏng texture mũ.
+            enhanced_frame = preprocess_result.cleaned_frame
 
             ai_data = None
             if preprocess_result.should_process:
